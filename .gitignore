@@ -1,0 +1,31 @@
+# Environments and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Storage and uploads
+storage/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

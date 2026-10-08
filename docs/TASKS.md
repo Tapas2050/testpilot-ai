@@ -1,0 +1,126 @@
+# TASKS: TestPilot AI
+
+Status key: [ ] not started, [~] in progress, [x] done, [!] blocked.
+Update after every task. Only one phase is in progress at a time. Details for each phase are in IMPLEMENTATION.md; tests are in TEST_PLAN.md.
+
+## Phase 1: Foundation
+- [x] 1.1 Create repo structure and .gitignore
+- [x] 1.2 Initialize backend uv project and add core dependencies
+- [x] 1.3 Settings loader from .env and .env.example (all names from RULES.md section 6)
+- [x] 1.4 FastAPI app with GET /health
+- [x] 1.5 Async SQLAlchemy engine, Alembic init, pgvector extension migration
+- [x] 1.6 Redis client and health check
+- [x] 1.7 Vite React placeholder app
+- [x] 1.8 README with local run commands
+- [x] 1.9 Phase 1 tests pass
+
+## Phase 2: Authentication Backend
+- [ ] 2.1 User and Session models, migration
+- [ ] 2.2 Password hashing and JWT helpers
+- [ ] 2.3 Register and login endpoints
+- [ ] 2.4 Current-user dependency with revocation check
+- [ ] 2.5 Me and logout endpoints
+- [ ] 2.6 Phase 2 tests pass
+
+## Phase 3: Project Management Backend
+- [ ] 3.1 Project and ProjectCredential models, migration
+- [ ] 3.2 Target URL validator (scheme, private-address blocking, allowlist)
+- [ ] 3.3 Credential encryption helper
+- [ ] 3.4 Project CRUD with owner scoping
+- [ ] 3.5 Credential endpoints
+- [ ] 3.6 Phase 3 tests pass
+
+## Phase 4: Frontend Auth and Project Shell
+- [ ] 4.1 Router, protected routes, API client
+- [ ] 4.2 AuthContext
+- [ ] 4.3 Shared components and design tokens
+- [ ] 4.4 Login and Register screens
+- [ ] 4.5 Dashboard with project list and project dialog
+- [ ] 4.6 Project page shell
+- [ ] 4.7 Empty, loading and error states
+- [ ] 4.8 Phase 4 tests pass
+
+## Phase 5: Document Upload and Extraction
+- [ ] 5.1 Document model, migration
+- [ ] 5.2 Storage module with interface
+- [ ] 5.3 Upload validation (type, size, safe names)
+- [ ] 5.4 Extractors (PDF, TXT, Markdown, JSON)
+- [ ] 5.5 List and delete endpoints
+- [ ] 5.6 Dropzone and document list in UI
+- [ ] 5.7 Phase 5 tests pass
+
+## Phase 6: RAG Pipeline
+- [ ] 6.1 DocumentChunk model with vector(384), migration
+- [ ] 6.2 Chunking function
+- [ ] 6.3 Local embedder module (loaded once)
+- [ ] 6.4 Index on upload, delete on document delete
+- [ ] 6.5 Project-scoped retrieval
+- [ ] 6.6 Redis retrieval cache with invalidation
+- [ ] 6.7 Phase 6 tests pass
+
+## Phase 7: SupportDesk Demo App (can run in parallel after Phase 1)
+- [ ] 7.1 Separate uv project and FastAPI app skeleton
+- [ ] 7.2 Login, roles, seeded users from env
+- [ ] 7.3 Ticket create, view, search, filter
+- [ ] 7.4 Status update, assign, delete (admin only), logout
+- [ ] 7.5 Defect switch SUPPORTDESK_DEFECTS with the three defects
+- [ ] 7.6 Write SUPPORTDESK_REQUIREMENTS.md
+- [ ] 7.7 Phase 7 tests pass (correct build and defective build)
+
+## Phase 8: Agent Foundation
+- [ ] 8.1 TestRun, TestCase, TestResult, Failure models, migration
+- [ ] 8.2 Agent state model and LangGraph graph with stub nodes
+- [ ] 8.3 Postgres checkpointer
+- [ ] 8.4 arq worker and job
+- [ ] 8.5 Start-run endpoint with duplicate lock
+- [ ] 8.6 Status updates (Postgres and Redis), get, list endpoints
+- [ ] 8.7 Cancel flag and endpoint
+- [ ] 8.8 Failure handling to FAILED
+- [ ] 8.9 Phase 8 tests pass
+
+## Phase 9: Planner Agent
+- [ ] 9.1 LLM provider module (primary, fallback, retry, rate limiting)
+- [ ] 9.2 Verify and record current free models and limits in DECISIONS.md
+- [ ] 9.3 Retrieval node
+- [ ] 9.4 Planner prompt and Pydantic test-case schema
+- [ ] 9.5 Validation with one retry
+- [ ] 9.6 Persist test cases, enforce MAX_TESTS_PER_RUN
+- [ ] 9.7 Phase 9 tests pass
+
+## Phase 10: Executor with Playwright MCP
+- [ ] 10.1 Pinned Playwright MCP launch over stdio and client wrapper
+- [ ] 10.2 Tool allowlist
+- [ ] 10.3 Executor node (one test at a time, step budget, timeout)
+- [ ] 10.4 Role-based login from stored credentials
+- [ ] 10.5 Evidence capture (action log, observations, screenshots)
+- [ ] 10.6 Result schema and persistence
+- [ ] 10.7 Credential redaction in logs and action logs
+- [ ] 10.8 Phase 10 tests pass
+
+## Phase 11: Failure Analyst and Report
+- [ ] 11.1 Analyst prompt and schema
+- [ ] 11.2 Analyst node (failed tests only), persist Failure
+- [ ] 11.3 Report node and report JSON
+- [ ] 11.4 Report endpoint and evidence endpoint
+- [ ] 11.5 Phase 11 tests pass (defective and correct builds)
+
+## Phase 12: Run and Report Frontend
+- [ ] 12.1 useRunStatus hook
+- [ ] 12.2 Test Run page (stepper, progress, plan, results, activity feed, cancel)
+- [ ] 12.3 Report page (tiles, severity, failures, screenshots)
+- [ ] 12.4 Run history on Project page
+- [ ] 12.5 Banners and all states
+- [ ] 12.6 Phase 12 tests pass and manual end-to-end check
+
+## Phase 13: Hardening and Demo Readiness
+- [ ] 13.1 Rate limiting on login and run creation
+- [ ] 13.2 Cross-user access test suite
+- [ ] 13.3 Credential-leak audit
+- [ ] 13.4 Structured logs with run ID
+- [ ] 13.5 Graceful LLM and rate-limit error handling
+- [ ] 13.6 README, seed scripts
+- [ ] 13.7 Demo rehearsal and backup recording
+- [ ] 13.8 Fresh-clone setup test
+
+## Blocked / Deferred
+(none yet)
