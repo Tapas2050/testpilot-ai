@@ -18,9 +18,9 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Phase 3 complete (Project Management Backend)
-- Last completed task: 3.6
-- Next task: 4.1 (Phase 4: Frontend Auth and Project Shell)
+- Current phase: Phase 4 complete (Frontend Auth and Project Shell)
+- Last completed task: 4.8
+- Next task: 5.1 (Phase 5: Document Upload and Extraction)
 - Date of last update: 2026-10-10
 
 ## 4. Environment Facts (verified)
@@ -28,8 +28,8 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations `3ef571d8a202_enable_vector_extension`, `d3d1ca663a5d_create_users_and_sessions_tables`, and `0cfe244ca2d8_create_projects_and_credentials_tables` applied to `testpilot`.
 - Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0` (verified live ping in Python). Requires `sudo service redis-server start` in WSL terminal.
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv` (system Python 3.14 bypassed), Node v24.19.0, npm 11.17.0, Git 2.55.0.
-- Vite 8.3.4 + React in `frontend/`.
-- All Phase 1, Phase 2, and Phase 3 tests (T1.1–T1.2, T2.1–T2.10, T3.1–T3.4) pass cleanly with 49/49 test cases in `testpilot_test`.
+- Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 6 passed (T4.1–T4.4).
+- All Phase 1, Phase 2, and Phase 3 tests (T1.1–T1.2, T2.1–T2.10, T3.1–T3.4) pass cleanly with 49/49 test cases in `testpilot_test`. Backend ruff clean. Frontend oxlint clean.
 
 ## 5. Conventions in Use
 - uv project inside `backend/` with `[tool.uv] package = false`.

@@ -32,14 +32,14 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 3.6 Phase 3 tests pass
 
 ## Phase 4: Frontend Auth and Project Shell
-- [ ] 4.1 Router, protected routes, API client
-- [ ] 4.2 AuthContext
-- [ ] 4.3 Shared components and design tokens
-- [ ] 4.4 Login and Register screens
-- [ ] 4.5 Dashboard with project list and project dialog
-- [ ] 4.6 Project page shell
-- [ ] 4.7 Empty, loading and error states
-- [ ] 4.8 Phase 4 tests pass
+- [x] 4.1 Router, protected routes, API client
+- [x] 4.2 AuthContext
+- [x] 4.3 Shared components and design tokens
+- [x] 4.4 Login and Register screens
+- [x] 4.5 Dashboard with project list and project dialog
+- [x] 4.6 Project page shell
+- [x] 4.7 Empty, loading and error states
+- [x] 4.8 Phase 4 tests pass
 
 ## Phase 5: Document Upload and Extraction
 - [ ] 5.1 Document model, migration
