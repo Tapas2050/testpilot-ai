@@ -1,0 +1,28 @@
+[project]
+name = "supportdesk"
+version = "0.1.0"
+description = "SupportDesk Demo Application for TestPilot AI"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.115.11",
+    "uvicorn[standard]==0.34.0",
+    "pydantic-settings==2.8.1",
+    "jinja2==3.1.6",
+    "python-multipart==0.0.20",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.5",
+    "pytest-asyncio==0.25.3",
+    "httpx==0.28.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -18,9 +18,9 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Phase 6 complete (RAG Pipeline)
-- Last completed task: 6.7
-- Next task: 7.1 (Phase 7: SupportDesk Demo App)
+- Current phase: Phase 7 complete (SupportDesk Demo App)
+- Last completed task: 7.7
+- Next task: 8.1 (Phase 8: Agent Foundation)
 - Date of last update: 2026-10-10
 
 ## 4. Environment Facts (verified)
@@ -29,7 +29,8 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0` (verified live ping in Python). Requires `sudo service redis-server start` in WSL terminal.
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv` (system Python 3.14 bypassed), Node v24.19.0, npm 11.17.0, Git 2.55.0.
 - Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 7 passed.
-- All Phase 1, Phase 2, Phase 3, Phase 5, and Phase 6 tests (T1.1–T1.2, T2.1–T2.10, T3.1–T3.4, T5.1–T5.4, T6.1–T6.4) pass cleanly with 57/57 test cases in `testpilot_test`. Backend ruff clean. Frontend oxlint clean. Local sentence-transformers model `all-MiniLM-L6-v2` cached on disk.
+- SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded demo credentials, toggleable planted defects via `SUPPORTDESK_DEFECTS`. All 3 tests (T7.1, T7.2, T7.3) pass cleanly.
+- All Phase 1, Phase 2, Phase 3, Phase 5, Phase 6, and Phase 7 tests pass cleanly. Total: 57 backend tests + 3 SupportDesk tests + 7 frontend tests. Ruff clean on both projects.
 
 ## 5. Conventions in Use
 - uv project inside `backend/` with `[tool.uv] package = false`.

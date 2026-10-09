@@ -23,6 +23,8 @@ dist-ssr/
 # Storage and uploads
 storage/
 *.log
+*.db
+*.sqlite3
 
 # IDE
 .idea/

@@ -60,13 +60,13 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 6.7 Phase 6 tests pass
 
 ## Phase 7: SupportDesk Demo App (can run in parallel after Phase 1)
-- [ ] 7.1 Separate uv project and FastAPI app skeleton
-- [ ] 7.2 Login, roles, seeded users from env
-- [ ] 7.3 Ticket create, view, search, filter
-- [ ] 7.4 Status update, assign, delete (admin only), logout
-- [ ] 7.5 Defect switch SUPPORTDESK_DEFECTS with the three defects
-- [ ] 7.6 Write SUPPORTDESK_REQUIREMENTS.md
-- [ ] 7.7 Phase 7 tests pass (correct build and defective build)
+- [x] 7.1 Separate uv project and FastAPI app skeleton
+- [x] 7.2 Login, roles, seeded users from env
+- [x] 7.3 Ticket create, view, search, filter
+- [x] 7.4 Status update, assign, delete (admin only), logout
+- [x] 7.5 Defect switch SUPPORTDESK_DEFECTS with the three defects
+- [x] 7.6 Write SUPPORTDESK_REQUIREMENTS.md
+- [x] 7.7 Phase 7 tests pass (correct build and defective build)
 
 ## Phase 8: Agent Foundation
 - [ ] 8.1 TestRun, TestCase, TestResult, Failure models, migration
