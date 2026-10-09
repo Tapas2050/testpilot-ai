@@ -24,12 +24,12 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 2.6 Phase 2 tests pass (T2.1–T2.10)
 
 ## Phase 3: Project Management Backend
-- [ ] 3.1 Project and ProjectCredential models, migration
-- [ ] 3.2 Target URL validator (scheme, private-address blocking, allowlist)
-- [ ] 3.3 Credential encryption helper
-- [ ] 3.4 Project CRUD with owner scoping
-- [ ] 3.5 Credential endpoints
-- [ ] 3.6 Phase 3 tests pass
+- [x] 3.1 Project and ProjectCredential models, migration
+- [x] 3.2 Target URL validator (scheme, private-address blocking, allowlist)
+- [x] 3.3 Credential encryption helper
+- [x] 3.4 Project CRUD with owner scoping
+- [x] 3.5 Credential endpoints
+- [x] 3.6 Phase 3 tests pass
 
 ## Phase 4: Frontend Auth and Project Shell
 - [ ] 4.1 Router, protected routes, API client

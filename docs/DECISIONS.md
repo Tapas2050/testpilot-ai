@@ -93,6 +93,18 @@ Context: The machine has system Python 3.14.7. Newer Python versions often lack 
 Decision: Backend and SupportDesk use Python 3.12, installed and managed by uv (uv python install 3.12, .python-version file, requires-python >=3.12,<3.13).
 Consequences: Reproducible installs independent of the system Python. If a dependency later proves to support 3.13 or 3.14, change this with a new decision entry. Verify package compatibility at install time rather than assuming.
 
+## D-017 Three-tier LLM fallback chain
+Status: Accepted
+Context: Free-tier daily quotas and rate limits are the primary execution risk for browser agent runs.
+Decision: Primary provider is Google AI Studio with Gemini 3.5 Flash Lite (`gemini-3.5-flash-lite`), secondary fallback is Gemini 3.1 Flash Lite (`gemini-3.1-flash-lite`), tertiary fallback is an OpenRouter free model supporting tool calling.
+Consequences: Resilience against transient provider outages and 429 rate limits without manual intervention.
+
+## D-018 Memory budget and worker isolation (8 GB host)
+Status: Accepted
+Context: Local Windows 11 host with 8 GB RAM and integrated Intel Iris Xe GPU (~83% RAM utilized at idle). Heavy dependencies (PyTorch/sentence-transformers, Playwright Chromium, FastAPI, arq) must not exhaust RAM.
+Decision: Run Playwright in headless mode only. Execute one test case at a time. Load sentence-transformers embeddings in the arq background worker process only, never in the API server web process.
+Consequences: Peak RAM during testing stays within available physical memory limits without thrashing.
+
 ## D-019 Password hashing with argon2-cffi
 Status: Accepted
 Context: SECURITY.md 2.1 requires passwords hashed with argon2 or bcrypt. Python stdlib PBKDF2 lacks memory-hardness against GPU/ASIC attacks.

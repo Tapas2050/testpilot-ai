@@ -88,3 +88,29 @@ def decode_access_token(token: str) -> Dict[str, Any]:
         },
     )
     return payload
+
+
+def get_fernet():
+    """Get Fernet instance initialized with CREDENTIAL_ENCRYPTION_KEY."""
+    from cryptography.fernet import Fernet
+
+    settings = get_settings()
+    if not settings.CREDENTIAL_ENCRYPTION_KEY:
+        raise ValueError("CREDENTIAL_ENCRYPTION_KEY is not configured in settings")
+    return Fernet(settings.CREDENTIAL_ENCRYPTION_KEY.encode("utf-8"))
+
+
+def encrypt_credential(plain_text: str) -> str:
+    """Encrypt a credential string using Fernet symmetric encryption."""
+    if plain_text is None:
+        raise ValueError("Cannot encrypt None credential")
+    f = get_fernet()
+    return f.encrypt(plain_text.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_credential(cipher_text: str) -> str:
+    """Decrypt a Fernet encrypted credential token to plaintext."""
+    if not cipher_text:
+        raise ValueError("Cannot decrypt empty credential token")
+    f = get_fernet()
+    return f.decrypt(cipher_text.encode("utf-8")).decode("utf-8")
