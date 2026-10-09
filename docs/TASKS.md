@@ -15,12 +15,13 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 1.9 Phase 1 tests pass
 
 ## Phase 2: Authentication Backend
-- [ ] 2.1 User and Session models, migration
-- [ ] 2.2 Password hashing and JWT helpers
-- [ ] 2.3 Register and login endpoints
-- [ ] 2.4 Current-user dependency with revocation check
-- [ ] 2.5 Me and logout endpoints
-- [ ] 2.6 Phase 2 tests pass
+- [x] 2.0 Test database setup (testpilot_test with NullPool, truncation, dependency override)
+- [x] 2.1 User and UserSession models, migration
+- [x] 2.2 Password hashing (argon2-cffi async) and JWT helpers (HS256, required claims)
+- [x] 2.3 Register and login endpoints
+- [x] 2.4 Current-user dependency with revocation check
+- [x] 2.5 Me and logout endpoints
+- [x] 2.6 Phase 2 tests pass (T2.1–T2.10)
 
 ## Phase 3: Project Management Backend
 - [ ] 3.1 Project and ProjectCredential models, migration

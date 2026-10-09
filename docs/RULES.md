@@ -49,6 +49,7 @@ All configuration comes from .env (never committed). Create .env.example with th
 
 Backend
 - DATABASE_URL
+- TEST_DATABASE_URL (separate database testpilot_test; tests must never use DATABASE_URL)
 - REDIS_URL
 - JWT_SECRET (generate a long random value)
 - JWT_EXPIRE_MINUTES=60
@@ -59,10 +60,12 @@ Backend
 
 LLM
 - GOOGLE_API_KEY
-- GOOGLE_MODEL (verify current free-tier Gemini Flash-class model, see D-003)
+- GOOGLE_MODEL (primary, Gemini 3.5 Flash Lite; copy the exact ID from AI Studio, see D-003)
+- GOOGLE_FALLBACK_MODEL (Gemini 3.1 Flash Lite; copy the exact ID from AI Studio)
 - OPENROUTER_API_KEY
-- OPENROUTER_MODEL (verify a current free model that supports tool calling)
-- LLM_MAX_RETRIES, LLM_REQUESTS_PER_MINUTE (set below the provider free limit)
+- OPENROUTER_MODEL (a ":free" model that supports tool calling, chosen from the OpenRouter Free Models collection)
+- LLM_MAX_RETRIES=3
+- LLM_REQUESTS_PER_MINUTE=12 (keep below the 15 RPM Flash-Lite limit shown on the AI Studio Rate Limit page)
 
 Embeddings
 - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
@@ -72,7 +75,7 @@ Agent limits
 - MAX_TESTS_PER_RUN=8
 - MAX_STEPS_PER_TEST=15
 - TEST_TIMEOUT_SECONDS=120
-- RUN_TIMEOUT_SECONDS=900
+- RUN_TIMEOUT_SECONDS=1800
 
 SupportDesk (demo target)
 - SUPPORTDESK_URL=http://localhost:8001

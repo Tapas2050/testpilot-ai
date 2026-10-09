@@ -24,6 +24,11 @@ Phase 2 (Auth)
 - T2.3 Login success and wrong-password failure with the same generic message
 - T2.4 Protected endpoint rejects missing, malformed, expired, and revoked tokens
 - T2.5 Logout revokes the token
+- T2.6 Case-insensitive email normalization and duplicate registration rejection
+- T2.7 Password length validation (8-128 characters enforced)
+- T2.8 JWT security validation: explicit algorithm, tampered signature, unknown jti, non-existent user, expired session row
+- T2.9 Settings refusal on empty or short JWT_SECRET (< 32 chars)
+- T2.10 Zero credential leaks in response bodies (no password or password_hash) and clean logs (no passwords or tokens)
 
 Phase 3 (Projects)
 - T3.1 CRUD works for the owner

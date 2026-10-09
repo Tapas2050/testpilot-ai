@@ -22,8 +22,11 @@ class Settings(BaseSettings):
 
     # Backend
     DATABASE_URL: str = Field(..., description="PostgreSQL asyncpg connection URL")
+    TEST_DATABASE_URL: str = Field(
+        "", description="PostgreSQL asyncpg test database connection URL"
+    )
     REDIS_URL: str = Field("redis://localhost:6379/0", description="Redis connection URL")
-    JWT_SECRET: str = Field("", description="JWT signing secret")
+    JWT_SECRET: str = Field(..., description="JWT signing secret")
     JWT_EXPIRE_MINUTES: int = Field(60, description="JWT expiration in minutes")
     CREDENTIAL_ENCRYPTION_KEY: str = Field("", description="Fernet encryption key for credentials")
     STORAGE_DIR: str = Field("./storage", description="Local storage directory")
@@ -31,6 +34,13 @@ class Settings(BaseSettings):
     ALLOWED_PRIVATE_HOSTS: Union[str, List[str]] = Field(
         "localhost,127.0.0.1", description="Allowed private hosts for target URL validation"
     )
+
+    @field_validator("JWT_SECRET", mode="after")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        if not v or len(v.strip()) < 32:
+            raise ValueError("JWT_SECRET must be at least 32 characters long and cannot be empty")
+        return v
 
     # LLM
     GOOGLE_API_KEY: str = Field("", description="Google AI Studio API key")

@@ -92,3 +92,9 @@ Status: Accepted
 Context: The machine has system Python 3.14.7. Newer Python versions often lack prebuilt packages for heavy dependencies (torch, sentence-transformers, PyMuPDF, asyncpg, langchain stack), which causes slow source builds or install failures.
 Decision: Backend and SupportDesk use Python 3.12, installed and managed by uv (uv python install 3.12, .python-version file, requires-python >=3.12,<3.13).
 Consequences: Reproducible installs independent of the system Python. If a dependency later proves to support 3.13 or 3.14, change this with a new decision entry. Verify package compatibility at install time rather than assuming.
+
+## D-019 Password hashing with argon2-cffi
+Status: Accepted
+Context: SECURITY.md 2.1 requires passwords hashed with argon2 or bcrypt. Python stdlib PBKDF2 lacks memory-hardness against GPU/ASIC attacks.
+Decision: Use `argon2-cffi` (pinned) instead of PBKDF2. Run hashing and verification inside `asyncio.to_thread` so the async event loop is never blocked. Compute a single dummy hash at application startup and verify against it when a login email does not exist to mitigate timing attacks.
+Consequences: Adds `argon2-cffi` dependency. Event loop stays responsive under high login traffic. Non-existent email lookups have indistinguishable response latency from wrong password checks.

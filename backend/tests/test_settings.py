@@ -29,7 +29,30 @@ def test_settings_allowed_private_hosts_parsing():
     """T1.2: Custom comma-separated allowed private hosts string parses to list."""
     settings = Settings(
         DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/test",
+        JWT_SECRET="a" * 32,
         ALLOWED_PRIVATE_HOSTS="app.local, api.local",
         _env_file=None,
     )
     assert settings.ALLOWED_PRIVATE_HOSTS == ["app.local", "api.local"]
+
+
+def test_settings_refuses_empty_jwt_secret():
+    """T2.9: Settings must refuse to start when JWT_SECRET is empty."""
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/test",
+            JWT_SECRET="",
+            _env_file=None,
+        )
+    assert any("JWT_SECRET" in str(err) for err in exc_info.value.errors())
+
+
+def test_settings_refuses_short_jwt_secret():
+    """T2.9: Settings must refuse to start when JWT_SECRET is shorter than 32 characters."""
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/test",
+            JWT_SECRET="short-secret-under-32-chars",
+            _env_file=None,
+        )
+    assert any("JWT_SECRET" in str(err) for err in exc_info.value.errors())

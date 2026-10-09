@@ -18,23 +18,29 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Phase 1 complete (Foundation)
-- Last completed task: 1.9
-- Next task: 2.1 (Phase 2: Authentication Backend)
+- Current phase: Phase 2 complete (Authentication Backend)
+- Last completed task: 2.6
+- Next task: 3.1 (Phase 3: Project Management Backend)
 - Date of last update: 2026-10-09
 
 ## 4. Environment Facts (verified)
 - Hardware: 8 GB RAM (about 83% used at idle), Intel Iris Xe integrated GPU, no dedicated GPU. Ollama installed with qwen3:1.7b only (not used by project, D-003). Memory budget rules in D-018.
-- Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migration `3ef571d8a202_enable_vector_extension` applied.
+- Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations `3ef571d8a202_enable_vector_extension` and `d3d1ca663a5d_create_users_and_sessions_tables` applied to `testpilot`.
 - Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0` (verified live ping in Python). Requires `sudo service redis-server start` in WSL terminal.
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv` (system Python 3.14 bypassed), Node v24.19.0, npm 11.17.0, Git 2.55.0.
 - Vite 8.3.4 + React in `frontend/`.
-- All Phase 1 tests (T1.1, T1.2) pass with 6/6 test cases.
+- All Phase 1 and Phase 2 tests (T1.1–T1.2, T2.1–T2.10) pass cleanly with 36/36 test cases in `testpilot_test`.
 
 ## 5. Conventions in Use
 - uv project inside `backend/` with `[tool.uv] package = false`.
-- Settings loaded with `pydantic-settings` from `.env` in repo root.
+- Settings loaded with `pydantic-settings` from `.env` in repo root. JWT_SECRET requires >= 32 chars.
 - SQLAlchemy async engine configured with `NullPool` to prevent cross-event-loop connection pool leakage in pytest async test runner.
+- Test database isolation via `backend/tests/conftest.py`: tests always run against `testpilot_test` with `NullPool`, schema created before session, tables truncated between tests, and `get_db` overridden. Tests never touch `testpilot`.
+- Timezone-aware datetimes only: `datetime.now(timezone.utc)`. Never use `datetime.utcnow()`.
+- Password hashing: `argon2-cffi` via `asyncio.to_thread` with startup dummy hash comparison for non-existent users (D-019).
+- ORM model for user sessions is named `UserSession` (mapped to `sessions` table) to avoid colliding with SQLAlchemy's `Session`.
+- JWT decoding requires explicit `algorithms=["HS256"]` and verifies `exp`, `sub`, and `jti`.
+- Email handling: stripped and lowercased on registration and login.
 - Redis health check uses scoped connection per check to prevent closed event loop errors across test runs.
 - NPM commands on Windows PowerShell use `npm.cmd` / `npx.cmd` to bypass script execution policy restrictions.
 
