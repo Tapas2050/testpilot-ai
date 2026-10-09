@@ -1,5 +1,6 @@
 """Redis client initialization and health check."""
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -10,18 +11,26 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 _redis_client: Optional[aioredis.Redis] = None
+_client_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 def get_redis_client() -> aioredis.Redis:
-    """Return the shared async Redis client instance."""
-    global _redis_client
-    if _redis_client is None:
+    """Return the async Redis client instance bound to the current running event loop."""
+    global _redis_client, _client_loop
+    current_loop: Optional[asyncio.AbstractEventLoop] = None
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+
+    if _redis_client is None or (_client_loop is not None and _client_loop is not current_loop):
         settings = get_settings()
         _redis_client = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
         )
+        _client_loop = current_loop
     return _redis_client
 
 

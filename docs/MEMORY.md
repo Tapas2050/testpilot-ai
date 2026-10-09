@@ -18,19 +18,20 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Phase 7 complete (SupportDesk Demo App)
-- Last completed task: 7.7
-- Next task: 8.1 (Phase 8: Agent Foundation)
+- Current phase: Phase 8 complete (Agent Foundation)
+- Last completed task: 8.9
+- Next task: 9.1 (Phase 9: Planner Agent)
 - Date of last update: 2026-10-10
 
 ## 4. Environment Facts (verified)
 - Hardware: 8 GB RAM (about 83% used at idle), Intel Iris Xe integrated GPU, no dedicated GPU. Ollama installed with qwen3:1.7b only (not used by project, D-003). Memory budget rules in D-018.
-- Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations `3ef571d8a202_enable_vector_extension`, `d3d1ca663a5d_create_users_and_sessions_tables`, `0cfe244ca2d8_create_projects_and_credentials_tables`, `7e0d9c8a3260_create_documents_table`, and `99562a345769_create_document_chunks_table` applied to `testpilot`.
+- Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations `3ef571d8a202_enable_vector_extension`, `d3d1ca663a5d_create_users_and_sessions_tables`, `0cfe244ca2d8_create_projects_and_credentials_tables`, `7e0d9c8a3260_create_documents_table`, `99562a345769_create_document_chunks_table`, and `fb153e7a31a1_create_test_runs_tables` applied to `testpilot`.
 - Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0` (verified live ping in Python). Requires `sudo service redis-server start` in WSL terminal.
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv` (system Python 3.14 bypassed), Node v24.19.0, npm 11.17.0, Git 2.55.0.
 - Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 7 passed.
 - SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded demo credentials, toggleable planted defects via `SUPPORTDESK_DEFECTS`. All 3 tests (T7.1, T7.2, T7.3) pass cleanly.
-- All Phase 1, Phase 2, Phase 3, Phase 5, Phase 6, and Phase 7 tests pass cleanly. Total: 57 backend tests + 3 SupportDesk tests + 7 frontend tests. Ruff clean on both projects.
+- LangGraph agent foundation with 5 stub nodes, Postgres checkpointer (`AsyncThreadPostgresSaver`), duplicate run lock in Redis, and run endpoints verified.
+- All Phase 1, Phase 2, Phase 3, Phase 5, Phase 6, Phase 7, and Phase 8 tests pass cleanly. Total: 63 backend tests + 3 SupportDesk tests + 7 frontend tests = 73 tests passing. Ruff clean on both projects.
 
 ## 5. Conventions in Use
 - uv project inside `backend/` with `[tool.uv] package = false`.

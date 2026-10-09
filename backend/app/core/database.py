@@ -1,7 +1,7 @@
 """Database connectivity, async SQLAlchemy engine, session factory, and health check."""
 
 import logging
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -36,6 +36,19 @@ async_session_factory = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+_session_factories: dict[str, async_sessionmaker[AsyncSession]] = {}
+
+
+def get_async_session_factory(db_url: Optional[str] = None) -> async_sessionmaker[AsyncSession]:
+    """Get or create an async sessionmaker for the given database URL."""
+    target_url = str(db_url or settings.DATABASE_URL)
+    if target_url not in _session_factories:
+        eng = create_async_engine(target_url, poolclass=NullPool, echo=False)
+        _session_factories[target_url] = async_sessionmaker(
+            bind=eng, class_=AsyncSession, expire_on_commit=False
+        )
+    return _session_factories[target_url]
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

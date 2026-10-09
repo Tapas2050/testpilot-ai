@@ -110,3 +110,9 @@ Status: Accepted
 Context: SECURITY.md 2.1 requires passwords hashed with argon2 or bcrypt. Python stdlib PBKDF2 lacks memory-hardness against GPU/ASIC attacks.
 Decision: Use `argon2-cffi` (pinned) instead of PBKDF2. Run hashing and verification inside `asyncio.to_thread` so the async event loop is never blocked. Compute a single dummy hash at application startup and verify against it when a login email does not exist to mitigate timing attacks.
 Consequences: Adds `argon2-cffi` dependency. Event loop stays responsive under high login traffic. Non-existent email lookups have indistinguishable response latency from wrong password checks.
+
+## D-020 Postgres checkpointer on Windows using PostgresSaver and psycopg-binary
+Status: Accepted
+Context: On Windows, Python's default asyncio event loop is `ProactorEventLoop`. `psycopg` async does not support `ProactorEventLoop` (raises error asking for `SelectorEventLoop`).
+Decision: Use synchronous `PostgresSaver` backed by a `psycopg_pool.ConnectionPool(kwargs={'autocommit': True})` wrapped with thread-safe execution or `asyncio.to_thread`.
+Consequences: LangGraph graph persistence works reliably across Windows asyncio event loops without altering global event loop policies.

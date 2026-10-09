@@ -69,15 +69,15 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 7.7 Phase 7 tests pass (correct build and defective build)
 
 ## Phase 8: Agent Foundation
-- [ ] 8.1 TestRun, TestCase, TestResult, Failure models, migration
-- [ ] 8.2 Agent state model and LangGraph graph with stub nodes
-- [ ] 8.3 Postgres checkpointer
-- [ ] 8.4 arq worker and job
-- [ ] 8.5 Start-run endpoint with duplicate lock
-- [ ] 8.6 Status updates (Postgres and Redis), get, list endpoints
-- [ ] 8.7 Cancel flag and endpoint
-- [ ] 8.8 Failure handling to FAILED
-- [ ] 8.9 Phase 8 tests pass
+- [x] 8.1 TestRun, TestCase, TestResult, Failure models, migration
+- [x] 8.2 Agent state model and LangGraph graph with stub nodes
+- [x] 8.3 Postgres checkpointer
+- [x] 8.4 arq worker and job
+- [x] 8.5 Start-run endpoint with duplicate lock
+- [x] 8.6 Status updates (Postgres and Redis), get, list endpoints
+- [x] 8.7 Cancel flag and endpoint
+- [x] 8.8 Failure handling to FAILED
+- [x] 8.9 Phase 8 tests pass
 
 ## Phase 9: Planner Agent
 - [ ] 9.1 LLM provider module (primary, fallback, retry, rate limiting)
