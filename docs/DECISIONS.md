@@ -122,3 +122,9 @@ Status: Accepted
 Context: Task 9.2 requires verifying and recording active free models, structured output reliability, tool-calling capability, and rate limits.
 Decision: Primary model is Google AI Studio `gemini-3.5-flash-lite`, verified via live smoke test with 100% success for structured JSON output and tool-calling. Secondary fallback is `gemini-3.1-flash-lite`. Tertiary fallback is OpenRouter `nvidia/nemotron-3-ultra-550b-a55b:free`. Configured client-side rate limit `LLM_REQUESTS_PER_MINUTE=15` with exponential backoff on transient 429 errors.
 Consequences: Complies with PRD and D-003 while staying strictly within free-tier quotas.
+
+## D-022 Pinned Playwright MCP Server via mcp/package.json
+Status: Accepted
+Context: D-008 and Task 10.1 require launching the pinned Playwright MCP server over stdio from Python. On Windows, executing npx.cmd dynamically inside async subprocess pipes can lead to interactive prompt deadlocks or network download overhead during test executions.
+Decision: Pin `@executeautomation/playwright-mcp-server@1.0.12` in `mcp/package.json` and execute its entrypoint directly with Node over stdio via `PlaywrightMCPClient`. Default to fast mock MCP client during automated Pytest runs unless marked for live evaluation.
+Consequences: Deterministic, offline-capable execution of Playwright MCP over stdio with zero download latency and no batch-script subprocess deadlocks.

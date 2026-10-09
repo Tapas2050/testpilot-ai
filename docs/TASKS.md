@@ -89,14 +89,14 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 9.7 Phase 9 tests pass
 
 ## Phase 10: Executor with Playwright MCP
-- [ ] 10.1 Pinned Playwright MCP launch over stdio and client wrapper
-- [ ] 10.2 Tool allowlist
-- [ ] 10.3 Executor node (one test at a time, step budget, timeout)
-- [ ] 10.4 Role-based login from stored credentials
-- [ ] 10.5 Evidence capture (action log, observations, screenshots)
-- [ ] 10.6 Result schema and persistence
-- [ ] 10.7 Credential redaction in logs and action logs
-- [ ] 10.8 Phase 10 tests pass
+- [x] 10.1 Pinned Playwright MCP launch over stdio and client wrapper
+- [x] 10.2 Tool allowlist
+- [x] 10.3 Executor node (one test at a time, step budget, timeout)
+- [x] 10.4 Role-based login from stored credentials
+- [x] 10.5 Evidence capture (action log, observations, screenshots)
+- [x] 10.6 Result schema and persistence
+- [x] 10.7 Credential redaction in logs and action logs
+- [x] 10.8 Phase 10 tests pass
 
 ## Phase 11: Failure Analyst and Report
 - [ ] 11.1 Analyst prompt and schema

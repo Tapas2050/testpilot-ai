@@ -18,6 +18,8 @@ from app.services.run_service import release_run_lock
 @pytest.fixture(autouse=True)
 def mock_planner_llm():
     """Mock LLM calls during agent foundation tests to ensure determinism and zero quota usage."""
+    from app.agent.executor import ExecutorAction
+
     mock_plan = PlanOutput(
         test_cases=[
             PlannedTestCase(
@@ -36,9 +38,26 @@ def mock_planner_llm():
             ),
         ]
     )
+
+    mock_action = ExecutorAction(
+        thought="Mock complete",
+        action="finish",
+        final_status="PASSED",
+        observation="Test scenario passed in mock",
+    )
+
     mock = MagicMock()
     mock.ainvoke = AsyncMock(return_value=mock_plan)
-    mock.with_structured_output.return_value = mock
+
+    def side_effect(schema):
+        sub_mock = MagicMock()
+        if schema is PlanOutput:
+            sub_mock.ainvoke = AsyncMock(return_value=mock_plan)
+        else:
+            sub_mock.ainvoke = AsyncMock(return_value=mock_action)
+        return sub_mock
+
+    mock.with_structured_output.side_effect = side_effect
     set_mock_llm(mock)
     yield
     set_mock_llm(None)

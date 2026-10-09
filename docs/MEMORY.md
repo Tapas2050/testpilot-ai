@@ -18,9 +18,9 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Phase 9 complete (Planner Agent)
-- Last completed task: 9.7
-- Next task: 10.1 (Phase 10: Executor with Playwright MCP)
+- Current phase: Phase 10 complete (Executor with Playwright MCP)
+- Last completed task: 10.8
+- Next task: 11.1 (Phase 11: Failure Analyst and Report)
 - Date of last update: 2026-10-10
 
 ## 4. Environment Facts (verified)
@@ -30,8 +30,8 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv` (system Python 3.14 bypassed), Node v24.19.0, npm 11.17.0, Git 2.55.0.
 - Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 7 passed.
 - SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded demo credentials, toggleable planted defects via `SUPPORTDESK_DEFECTS`. All 3 tests (T7.1, T7.2, T7.3) pass cleanly.
-- LangGraph agent foundation and Planner Agent verified: Pydantic test-case schema with required citation, injection defense prompt, retrieval integration, one retry validation, and fallback chain.
-- All Phase 1 through Phase 9 tests pass cleanly. Total: 70 backend tests (69 unit + 1 eval) + 3 SupportDesk tests + 7 frontend tests = 80 tests passing. Ruff clean on both projects.
+- LangGraph agent foundation, Planner Agent, and Executor Agent verified: Playwright MCP client over stdio with Node, strict tool allowlist, role-based login, step budget (15) and per-test timeout (120s), screenshots linked, credential redaction across action logs and DB results, prompt injection defense.
+- All Phase 1 through Phase 10 tests pass cleanly. Total: 74 backend tests (plus 2 eval) + 3 SupportDesk tests + 7 frontend tests = 84 tests passing. Ruff clean on both projects.
 - Live LLM calls logged: 1 live call in T9.7 eval test (plus 2 calls in pre-implementation smoke test). Zero quota issues encountered.
 
 ## 5. Conventions in Use

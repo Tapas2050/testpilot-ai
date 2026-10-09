@@ -9,7 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from app.agent.checkpointer import get_checkpointer
 from app.agent.state import AgentState
 from app.core.database import get_async_session_factory
-from app.models.test_run import TestCase, TestResult
+from app.models.test_run import TestCase
 from app.services.run_service import (
     cache_run_status,
     is_cancel_flag_set,
@@ -121,8 +121,9 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
 
 
 async def execute_node(state: AgentState) -> dict[str, Any]:
-    """Stub Executor node: Runs test cases and collects results."""
+    """Executor node: Runs test cases step-by-step using Playwright MCP client."""
     run_id = uuid.UUID(state["run_id"])
+    project_id = uuid.UUID(state["project_id"])
     db_url = state.get("db_url")
     if await check_cancellation(state):
         return {"cancel_requested": True, "current_stage": "CANCELLED"}
@@ -131,25 +132,71 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
 
+    from pathlib import Path
+
+    from sqlalchemy import select
+
+    from app.agent.executor import execute_single_test_case
+    from app.agent.mcp_client import PlaywrightMCPClient
+    from app.core.config import get_settings
+    from app.core.security import decrypt_credential
+    from app.models.credential import ProjectCredential
+    from app.models.project import Project
+
+    settings = get_settings()
+    storage_dir = Path(settings.STORAGE_DIR)
+
     results = []
     session_factory = get_async_session_factory(db_url)
     async with session_factory() as session:
-        from sqlalchemy import select
+        # 1. Fetch project target URL
+        proj_stmt = select(Project).where(Project.id == project_id)
+        project = (await session.execute(proj_stmt)).scalar_one_or_none()
+        target_url = project.target_url if project else "http://localhost:8001"
+
+        # 2. Fetch and decrypt stored project credentials
+        cred_stmt = select(ProjectCredential).where(ProjectCredential.project_id == project_id)
+        db_creds = (await session.execute(cred_stmt)).scalars().all()
+        credentials: dict[str, dict[str, str]] = {}
+        for c in db_creds:
+            try:
+                decrypted_pw = decrypt_credential(c.password_encrypted)
+            except Exception:
+                decrypted_pw = ""
+            credentials[c.role_label.lower()] = {
+                "email": c.username,
+                "password": decrypted_pw,
+            }
+
+        # 3. Retrieve planned test cases
         stmt = select(TestCase).where(TestCase.run_id == run_id).order_by(TestCase.order_index)
         tcs = (await session.execute(stmt)).scalars().all()
 
-        for idx, tc in enumerate(tcs):
-            tc.status = "PASSED"
-            res = TestResult(
-                test_case_id=tc.id,
-                status="PASSED",
-                steps=[{"step": 1, "action": "navigate", "status": "ok"}],
-                duration_seconds=1.2,
-            )
-            session.add(res)
-            results.append({"test_case_id": str(tc.id), "status": "PASSED"})
+        import os
+        is_mock_mcp = state.get("is_mock_mcp", False) or bool(os.getenv("PYTEST_CURRENT_TEST"))
+        mcp_client = PlaywrightMCPClient(is_mock=is_mock_mcp)
+        await mcp_client.start()
 
-        await session.commit()
+        try:
+            for tc in tcs:
+                if await check_cancellation(state):
+                    return {"cancel_requested": True, "current_stage": "CANCELLED"}
+
+                result = await execute_single_test_case(
+                    test_case=tc,
+                    target_url=target_url,
+                    credentials=credentials,
+                    mcp_client=mcp_client,
+                    run_id=run_id,
+                    storage_dir=storage_dir,
+                )
+                tc.status = result.status
+                session.add(result)
+                await session.commit()
+                results.append({"test_case_id": str(tc.id), "status": result.status})
+
+        finally:
+            await mcp_client.close()
 
     return {
         "current_stage": "EXECUTING",

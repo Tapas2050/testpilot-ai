@@ -39,7 +39,10 @@ def reset_live_call_count() -> None:
 
 async def enforce_rate_limit() -> None:
     """Ensure we do not exceed LLM_REQUESTS_PER_MINUTE."""
-    global _last_call_time, _live_call_count
+    global _last_call_time, _live_call_count, _mock_llm
+    if _mock_llm is not None:
+        return
+
     settings = get_settings()
     rpm = max(1, settings.LLM_REQUESTS_PER_MINUTE)
     interval = 60.0 / rpm

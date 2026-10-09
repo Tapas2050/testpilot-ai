@@ -1,0 +1,8 @@
+{
+  "name": "testpilot-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "@executeautomation/playwright-mcp-server": "1.0.12"
+  }
+}
