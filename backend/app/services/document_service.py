@@ -16,6 +16,7 @@ from app.services.extractor import (
     extract_text,
     validate_file_upload,
 )
+from app.services.rag_service import rag_service
 from app.services.storage import StorageProvider, storage_provider
 
 
@@ -91,6 +92,10 @@ class DocumentService:
         db.add(document)
         await db.commit()
         await db.refresh(document)
+
+        if extraction_status == "SUCCESS":
+            await rag_service.index_document(db, document)
+
         return document
 
     async def list_documents(
@@ -123,12 +128,17 @@ class DocumentService:
                 detail="Document not found",
             )
 
+        project_id = document.project_id
+
         # Remove physical file
         self.storage.delete(document.stored_name)
 
         # Remove DB record
         await db.delete(document)
         await db.commit()
+
+        # Invalidate project RAG cache
+        await rag_service.invalidate_cache(project_id)
 
 
 document_service = DocumentService()

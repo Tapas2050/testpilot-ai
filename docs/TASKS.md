@@ -51,13 +51,13 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 5.7 Phase 5 tests pass
 
 ## Phase 6: RAG Pipeline
-- [ ] 6.1 DocumentChunk model with vector(384), migration
-- [ ] 6.2 Chunking function
-- [ ] 6.3 Local embedder module (loaded once)
-- [ ] 6.4 Index on upload, delete on document delete
-- [ ] 6.5 Project-scoped retrieval
-- [ ] 6.6 Redis retrieval cache with invalidation
-- [ ] 6.7 Phase 6 tests pass
+- [x] 6.1 DocumentChunk model with vector(384), migration
+- [x] 6.2 Chunking function
+- [x] 6.3 Local embedder module (loaded once)
+- [x] 6.4 Index on upload, delete on document delete
+- [x] 6.5 Project-scoped retrieval
+- [x] 6.6 Redis retrieval cache with invalidation
+- [x] 6.7 Phase 6 tests pass
 
 ## Phase 7: SupportDesk Demo App (can run in parallel after Phase 1)
 - [ ] 7.1 Separate uv project and FastAPI app skeleton
