@@ -41,35 +41,76 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
 
-    # In Phase 8 foundation, insert 2 stub test cases into DB if not present
+    # Retrieve project documents and generate test plan via Planner Agent
     session_factory = get_async_session_factory(db_url)
     async with session_factory() as session:
-        tc1 = TestCase(
-            run_id=run_id,
-            title="Verify user login with valid credentials",
-            description="Login with admin credentials and verify redirect to /tickets",
-            source_requirement="REQ-AUTH-01",
-            target_role="admin",
-            status="PENDING",
-            order_index=1,
+        from sqlalchemy import select
+
+        from app.agent.planner import generate_test_plan
+        from app.models.document import Document
+        from app.models.project import Project
+        from app.services.rag_service import RAGService
+
+        project_id = uuid.UUID(state["project_id"])
+        proj_stmt = select(Project).where(Project.id == project_id)
+        project = (await session.execute(proj_stmt)).scalar_one_or_none()
+        target_url = project.target_url if project else "http://localhost:8001"
+
+        rag = RAGService()
+        rag_query = (
+            "user roles authentication login ticket creation "
+            "status search filter delete permissions"
         )
-        tc2 = TestCase(
-            run_id=run_id,
-            title="Verify support agent cannot delete tickets",
-            description="Attempt ticket deletion as support agent and expect 403",
-            source_requirement="REQ-SEC-02",
-            target_role="agent",
-            status="PENDING",
-            order_index=2,
+        chunks = await rag.retrieve(
+            session,
+            project_id,
+            query=rag_query,
+            top_k=8,
         )
-        session.add_all([tc1, tc2])
+
+        requirements_parts = [c["content"] for c in chunks] if chunks else []
+
+        if not requirements_parts:
+            doc_stmt = select(Document.extracted_text).where(
+                Document.project_id == project_id,
+                Document.extracted_text.isnot(None),
+            )
+            docs = (await session.execute(doc_stmt)).scalars().all()
+            requirements_parts = [d for d in docs if d and d.strip()]
+
+        if not requirements_parts:
+            requirements_text = "No specification documents uploaded for this project."
+        else:
+            requirements_text = "\n\n---\n\n".join(requirements_parts)
+
+        plan = await generate_test_plan(requirements_text=requirements_text, project_url=target_url)
+
+        db_test_cases = []
+        for idx, tc in enumerate(plan.test_cases, start=1):
+            db_tc = TestCase(
+                run_id=run_id,
+                title=tc.title,
+                description=tc.description,
+                source_requirement=tc.source_requirement,
+                target_role=tc.target_role,
+                status="PENDING",
+                order_index=idx,
+            )
+            session.add(db_tc)
+            db_test_cases.append(db_tc)
+
         await session.commit()
-        await session.refresh(tc1)
-        await session.refresh(tc2)
+        for db_tc in db_test_cases:
+            await session.refresh(db_tc)
 
         test_cases = [
-            {"id": str(tc1.id), "title": tc1.title, "role": tc1.target_role},
-            {"id": str(tc2.id), "title": tc2.title, "role": tc2.target_role},
+            {
+                "id": str(db_tc.id),
+                "title": db_tc.title,
+                "role": db_tc.target_role,
+                "source_requirement": db_tc.source_requirement,
+            }
+            for db_tc in db_test_cases
         ]
 
     return {

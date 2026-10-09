@@ -116,3 +116,9 @@ Status: Accepted
 Context: On Windows, Python's default asyncio event loop is `ProactorEventLoop`. `psycopg` async does not support `ProactorEventLoop` (raises error asking for `SelectorEventLoop`).
 Decision: Use synchronous `PostgresSaver` backed by a `psycopg_pool.ConnectionPool(kwargs={'autocommit': True})` wrapped with thread-safe execution or `asyncio.to_thread`.
 Consequences: LangGraph graph persistence works reliably across Windows asyncio event loops without altering global event loop policies.
+
+## D-021 Verified LLM model names and limits for Phase 9
+Status: Accepted
+Context: Task 9.2 requires verifying and recording active free models, structured output reliability, tool-calling capability, and rate limits.
+Decision: Primary model is Google AI Studio `gemini-3.5-flash-lite`, verified via live smoke test with 100% success for structured JSON output and tool-calling. Secondary fallback is `gemini-3.1-flash-lite`. Tertiary fallback is OpenRouter `nvidia/nemotron-3-ultra-550b-a55b:free`. Configured client-side rate limit `LLM_REQUESTS_PER_MINUTE=15` with exponential backoff on transient 429 errors.
+Consequences: Complies with PRD and D-003 while staying strictly within free-tier quotas.

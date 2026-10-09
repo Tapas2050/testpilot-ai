@@ -1,6 +1,5 @@
-"""Phase 8 tests for Agent Foundation (T8.1 - T8.6)."""
-
 import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import AsyncClient
@@ -9,9 +8,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.checkpointer import get_checkpointer
 from app.agent.graph import execute_agent_run
+from app.agent.llm import set_mock_llm
+from app.agent.planner import PlannedTestCase, PlanOutput
 from app.core.config import get_settings
 from app.models.user import User
 from app.services.run_service import release_run_lock
+
+
+@pytest.fixture(autouse=True)
+def mock_planner_llm():
+    """Mock LLM calls during agent foundation tests to ensure determinism and zero quota usage."""
+    mock_plan = PlanOutput(
+        test_cases=[
+            PlannedTestCase(
+                title="Verify user login with valid credentials",
+                description="Login with admin credentials and verify redirect to /tickets",
+                source_requirement="REQ-AUTH-01",
+                target_role="admin",
+                steps=["Open /login", "Enter admin credentials", "Submit"],
+            ),
+            PlannedTestCase(
+                title="Verify support agent cannot delete tickets",
+                description="Attempt ticket deletion as support agent and expect 403",
+                source_requirement="REQ-SEC-02",
+                target_role="agent",
+                steps=["Open /tickets/1", "Attempt delete", "Expect 403"],
+            ),
+        ]
+    )
+    mock = MagicMock()
+    mock.ainvoke = AsyncMock(return_value=mock_plan)
+    mock.with_structured_output.return_value = mock
+    set_mock_llm(mock)
+    yield
+    set_mock_llm(None)
 
 
 @pytest.fixture

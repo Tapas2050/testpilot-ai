@@ -18,9 +18,9 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Phase 8 complete (Agent Foundation)
-- Last completed task: 8.9
-- Next task: 9.1 (Phase 9: Planner Agent)
+- Current phase: Phase 9 complete (Planner Agent)
+- Last completed task: 9.7
+- Next task: 10.1 (Phase 10: Executor with Playwright MCP)
 - Date of last update: 2026-10-10
 
 ## 4. Environment Facts (verified)
@@ -30,8 +30,9 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv` (system Python 3.14 bypassed), Node v24.19.0, npm 11.17.0, Git 2.55.0.
 - Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 7 passed.
 - SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded demo credentials, toggleable planted defects via `SUPPORTDESK_DEFECTS`. All 3 tests (T7.1, T7.2, T7.3) pass cleanly.
-- LangGraph agent foundation with 5 stub nodes, Postgres checkpointer (`AsyncThreadPostgresSaver`), duplicate run lock in Redis, and run endpoints verified.
-- All Phase 1, Phase 2, Phase 3, Phase 5, Phase 6, Phase 7, and Phase 8 tests pass cleanly. Total: 63 backend tests + 3 SupportDesk tests + 7 frontend tests = 73 tests passing. Ruff clean on both projects.
+- LangGraph agent foundation and Planner Agent verified: Pydantic test-case schema with required citation, injection defense prompt, retrieval integration, one retry validation, and fallback chain.
+- All Phase 1 through Phase 9 tests pass cleanly. Total: 70 backend tests (69 unit + 1 eval) + 3 SupportDesk tests + 7 frontend tests = 80 tests passing. Ruff clean on both projects.
+- Live LLM calls logged: 1 live call in T9.7 eval test (plus 2 calls in pre-implementation smoke test). Zero quota issues encountered.
 
 ## 5. Conventions in Use
 - uv project inside `backend/` with `[tool.uv] package = false`.

@@ -80,13 +80,13 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 8.9 Phase 8 tests pass
 
 ## Phase 9: Planner Agent
-- [ ] 9.1 LLM provider module (primary, fallback, retry, rate limiting)
-- [ ] 9.2 Verify and record current free models and limits in DECISIONS.md
-- [ ] 9.3 Retrieval node
-- [ ] 9.4 Planner prompt and Pydantic test-case schema
-- [ ] 9.5 Validation with one retry
-- [ ] 9.6 Persist test cases, enforce MAX_TESTS_PER_RUN
-- [ ] 9.7 Phase 9 tests pass
+- [x] 9.1 LLM provider module (primary, fallback, retry, rate limiting)
+- [x] 9.2 Verify and record current free models and limits in DECISIONS.md
+- [x] 9.3 Retrieval node
+- [x] 9.4 Planner prompt and Pydantic test-case schema
+- [x] 9.5 Validation with one retry
+- [x] 9.6 Persist test cases, enforce MAX_TESTS_PER_RUN
+- [x] 9.7 Phase 9 tests pass
 
 ## Phase 10: Executor with Playwright MCP
 - [ ] 10.1 Pinned Playwright MCP launch over stdio and client wrapper

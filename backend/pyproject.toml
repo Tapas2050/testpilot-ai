@@ -23,6 +23,8 @@ dependencies = [
     "arq>=0.28.0",
     "langgraph-checkpoint-postgres>=3.1.2",
     "psycopg-binary>=3.3.6",
+    "langchain-google-genai>=4.4.0",
+    "langchain-openai>=1.7.0",
 ]
 
 [dependency-groups]
@@ -41,6 +43,9 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "eval: live evaluation tests with live LLM calls",
+]
 
 [tool.ruff]
 target-version = "py312"
