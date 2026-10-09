@@ -42,13 +42,13 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 4.8 Phase 4 tests pass
 
 ## Phase 5: Document Upload and Extraction
-- [ ] 5.1 Document model, migration
-- [ ] 5.2 Storage module with interface
-- [ ] 5.3 Upload validation (type, size, safe names)
-- [ ] 5.4 Extractors (PDF, TXT, Markdown, JSON)
-- [ ] 5.5 List and delete endpoints
-- [ ] 5.6 Dropzone and document list in UI
-- [ ] 5.7 Phase 5 tests pass
+- [x] 5.1 Document model, migration
+- [x] 5.2 Storage module with interface
+- [x] 5.3 Upload validation (type, size, safe names)
+- [x] 5.4 Extractors (PDF, TXT, Markdown, JSON)
+- [x] 5.5 List and delete endpoints
+- [x] 5.6 Dropzone and document list in UI
+- [x] 5.7 Phase 5 tests pass
 
 ## Phase 6: RAG Pipeline
 - [ ] 6.1 DocumentChunk model with vector(384), migration

@@ -18,18 +18,18 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Phase 4 complete (Frontend Auth and Project Shell)
-- Last completed task: 4.8
-- Next task: 5.1 (Phase 5: Document Upload and Extraction)
+- Current phase: Phase 5 complete (Document Upload and Extraction)
+- Last completed task: 5.7
+- Next task: 6.1 (Phase 6: RAG Pipeline)
 - Date of last update: 2026-10-10
 
 ## 4. Environment Facts (verified)
 - Hardware: 8 GB RAM (about 83% used at idle), Intel Iris Xe integrated GPU, no dedicated GPU. Ollama installed with qwen3:1.7b only (not used by project, D-003). Memory budget rules in D-018.
-- Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations `3ef571d8a202_enable_vector_extension`, `d3d1ca663a5d_create_users_and_sessions_tables`, and `0cfe244ca2d8_create_projects_and_credentials_tables` applied to `testpilot`.
+- Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations `3ef571d8a202_enable_vector_extension`, `d3d1ca663a5d_create_users_and_sessions_tables`, `0cfe244ca2d8_create_projects_and_credentials_tables`, and `7e0d9c8a3260_create_documents_table` applied to `testpilot`.
 - Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0` (verified live ping in Python). Requires `sudo service redis-server start` in WSL terminal.
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv` (system Python 3.14 bypassed), Node v24.19.0, npm 11.17.0, Git 2.55.0.
-- Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 6 passed (T4.1–T4.4).
-- All Phase 1, Phase 2, and Phase 3 tests (T1.1–T1.2, T2.1–T2.10, T3.1–T3.4) pass cleanly with 49/49 test cases in `testpilot_test`. Backend ruff clean. Frontend oxlint clean.
+- Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 7 passed (T4.1–T4.4, dropzone & documents enablement).
+- All Phase 1, Phase 2, Phase 3, and Phase 5 tests (T1.1–T1.2, T2.1–T2.10, T3.1–T3.4, T5.1–T5.4) pass cleanly with 53/53 test cases in `testpilot_test`. Backend ruff clean. Frontend oxlint clean.
 
 ## 5. Conventions in Use
 - uv project inside `backend/` with `[tool.uv] package = false`.

@@ -30,6 +30,11 @@ vi.mock('../api/client', () => ({
       addCredential: vi.fn(),
       deleteCredential: vi.fn(),
     },
+    documents: {
+      list: vi.fn(),
+      upload: vi.fn(),
+      delete: vi.fn(),
+    },
   },
   ApiError: class ApiError extends Error {
     constructor(msg, status, data) {
@@ -209,6 +214,7 @@ describe('Phase 4: Frontend Auth and Project Shell Tests', () => {
       target_url: 'http://localhost:3000',
     });
     api.projects.listCredentials.mockResolvedValueOnce([]);
+    api.documents.list.mockResolvedValueOnce([]);
 
     render(
       <MemoryRouter initialEntries={['/projects/proj-123']}>
@@ -225,6 +231,43 @@ describe('Phase 4: Frontend Auth and Project Shell Tests', () => {
       expect(screen.getByText(/Upload your requirements so the agent knows what to test/i)).toBeInTheDocument();
       const startBtn = screen.getByTestId('start-run-btn');
       expect(startBtn).toBeDisabled();
+    });
+  });
+
+  // ProjectPage with documents enables Start Run button
+  it('renders ProjectPage with documents and enables Start Run button', async () => {
+    api.projects.get.mockResolvedValueOnce({
+      id: 'proj-123',
+      name: 'SupportDesk Test',
+      description: 'SupportDesk application testing',
+      target_url: 'http://localhost:3000',
+    });
+    api.projects.listCredentials.mockResolvedValueOnce([]);
+    api.documents.list.mockResolvedValueOnce([
+      {
+        id: 'doc-1',
+        original_name: 'requirements.pdf',
+        file_type: 'pdf',
+        size_bytes: 10240,
+        extraction_status: 'SUCCESS',
+      },
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={['/projects/proj-123']}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectPage />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('requirements.pdf')).toBeInTheDocument();
+      expect(screen.getByText('SUCCESS')).toBeInTheDocument();
+      const startBtn = screen.getByTestId('start-run-btn');
+      expect(startBtn).not.toBeDisabled();
     });
   });
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { Navbar } from '../components/Navbar';
@@ -8,6 +8,7 @@ import { CredentialDialog } from '../components/CredentialDialog';
 export function ProjectPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
 
   const [project, setProject] = useState(null);
   const [credentials, setCredentials] = useState([]);
@@ -15,6 +16,10 @@ export function ProjectPage() {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isCredOpen, setIsCredOpen] = useState(false);
@@ -29,8 +34,10 @@ export function ProjectPage() {
       const creds = await api.projects.listCredentials(id);
       setCredentials(creds);
 
-      // In Phase 4, documents and runs APIs will be hooked in subsequent phases
-      setDocuments([]);
+      const docs = await api.documents.list(id);
+      setDocuments(docs);
+
+      // Runs will be hooked in Phase 8
       setRuns([]);
     } catch (err) {
       setError(err.message || 'Failed to load project');
@@ -73,6 +80,42 @@ export function ProjectPage() {
         alert(err.message || 'Failed to delete credential');
       }
     }
+  };
+
+  const handleFileUpload = async (file) => {
+    if (!file) return;
+    setUploadError('');
+    setUploading(true);
+    try {
+      const newDoc = await api.documents.upload(id, file);
+      setDocuments((prev) => [newDoc, ...prev]);
+    } catch (err) {
+      setUploadError(err.message || 'Failed to upload document');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleDeleteDocument = async (docId) => {
+    if (window.confirm('Delete this document?')) {
+      try {
+        await api.documents.delete(docId);
+        setDocuments(documents.filter((d) => d.id !== docId));
+      } catch (err) {
+        alert(err.message || 'Failed to delete document');
+      }
+    }
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
   };
 
   if (loading) {
@@ -165,21 +208,128 @@ export function ProjectPage() {
             {/* Requirements & Documents Card */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h2>Requirements & Documents</h2>
-              </div>
-              
-              {documents.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '32px 16px', border: '1px dashed var(--border-color)', borderRadius: '6px' }}>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '4px' }}>
-                    Upload your requirements so the agent knows what to test.
-                  </p>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
-                    Supported formats: PDF, Markdown, TXT, JSON (up to 10MB)
+                <div>
+                  <h2>Requirements & Documents</h2>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '2px' }}>
+                    Uploaded requirements are sent to external LLMs for test planning.
                   </p>
                 </div>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="btn btn-secondary"
+                  disabled={uploading}
+                  data-testid="upload-doc-btn"
+                >
+                  + Upload Document
+                </button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  style={{ display: 'none' }}
+                  accept=".pdf,.txt,.md,.markdown,.json"
+                  onChange={(e) => handleFileUpload(e.target.files?.[0])}
+                  data-testid="file-input"
+                />
+              </div>
+
+              {uploadError && (
+                <div className="badge badge-fail" style={{ width: '100%', padding: '10px', marginBottom: '12px', borderRadius: '4px' }}>
+                  {uploadError}
+                </div>
+              )}
+
+              {uploading && (
+                <div style={{ padding: '16px', marginBottom: '12px', backgroundColor: 'var(--surface-color)', borderRadius: '6px', textAlign: 'center', color: 'var(--accent-color)', fontSize: '13px' }}>
+                  Processing document and extracting text...
+                </div>
+              )}
+
+              {/* Dropzone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) handleFileUpload(file);
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  textAlign: 'center',
+                  padding: '24px 16px',
+                  border: isDragging ? '2px dashed var(--accent-color)' : '1px dashed var(--border-color)',
+                  backgroundColor: isDragging ? 'rgba(79, 70, 229, 0.05)' : '#FFFFFF',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  marginBottom: documents.length > 0 ? '16px' : 0,
+                  transition: 'border-color 0.15s, background-color 0.15s',
+                }}
+                data-testid="document-dropzone"
+              >
+                <p style={{ color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500, marginBottom: '4px' }}>
+                  Click to browse or drop file here
+                </p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
+                  Supported formats: PDF, Markdown, TXT, JSON (up to 10MB)
+                </p>
+              </div>
+
+              {/* Documents List */}
+              {documents.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                  Upload your requirements so the agent knows what to test.
+                </div>
               ) : (
-                <div>
-                  {/* Documents list will be rendered in Phase 5 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {documents.map((doc) => (
+                    <div
+                      key={doc.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '12px',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                      }}
+                      data-testid={`document-item-${doc.id}`}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                          <span className="badge badge-info" style={{ textTransform: 'uppercase', fontSize: '10px' }}>
+                            {doc.file_type}
+                          </span>
+                          <span style={{ fontWeight: 500, fontSize: '13px' }}>{doc.original_name}</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', gap: '12px' }}>
+                          <span>Size: {formatFileSize(doc.size_bytes)}</span>
+                          <span>
+                            Status:{' '}
+                            <span style={{
+                              color: doc.extraction_status === 'SUCCESS' ? 'var(--pass-color)' : 'var(--fail-color)',
+                              fontWeight: 600
+                            }}>
+                              {doc.extraction_status}
+                            </span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDocument(doc.id);
+                        }}
+                        className="btn btn-danger"
+                        style={{ padding: '4px 8px', fontSize: '12px' }}
+                        data-testid={`delete-doc-btn-${doc.id}`}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

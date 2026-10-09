@@ -17,7 +17,7 @@ async function request(endpoint, options = {}) {
   const token = sessionStorage.getItem('testpilot_token') || localStorage.getItem('testpilot_token');
   
   const headers = {
-    'Content-Type': 'application/json',
+    ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers,
   };
@@ -93,6 +93,21 @@ export const api = {
       }),
     deleteCredential: (projectId, credentialId) =>
       request(`/projects/${projectId}/credentials/${credentialId}`, {
+        method: 'DELETE',
+      }),
+  },
+  documents: {
+    list: (projectId) => request(`/projects/${projectId}/documents`),
+    upload: (projectId, file) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return request(`/projects/${projectId}/documents`, {
+        method: 'POST',
+        body: formData,
+      });
+    },
+    delete: (documentId) =>
+      request(`/documents/${documentId}`, {
         method: 'DELETE',
       }),
   },
