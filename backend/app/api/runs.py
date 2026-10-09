@@ -244,3 +244,77 @@ async def cancel_test_run(
     await release_run_lock(run.project_id)
 
     return run
+
+
+@router.get("/runs/{run_id}/report")
+async def get_test_run_report(
+    run_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve the generated test run report JSON."""
+    stmt = (
+        select(TestRun)
+        .join(Project, TestRun.project_id == Project.id)
+        .where(TestRun.id == run_id, Project.user_id == user.id)
+    )
+    run = (await db.execute(stmt)).scalar_one_or_none()
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Test run not found",
+        )
+
+    if not run.report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not yet generated for this run",
+        )
+
+    return run.report
+
+
+@router.get("/runs/{run_id}/screenshots/{filename}")
+async def get_run_screenshot(
+    run_id: uuid.UUID,
+    filename: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve authenticated test screenshot evidence."""
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    from app.core.config import get_settings
+
+    # Verify run ownership
+    stmt = (
+        select(TestRun)
+        .join(Project, TestRun.project_id == Project.id)
+        .where(TestRun.id == run_id, Project.user_id == user.id)
+    )
+    run = (await db.execute(stmt)).scalar_one_or_none()
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Test run not found",
+        )
+
+    # Sanitize filename against directory traversal
+    clean_name = Path(filename).name
+    if not clean_name.endswith(".png"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid screenshot file format",
+        )
+
+    settings = get_settings()
+    file_path = Path(settings.STORAGE_DIR) / "screenshots" / str(run_id) / clean_name
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Screenshot evidence not found",
+        )
+
+    return FileResponse(file_path, media_type="image/png")

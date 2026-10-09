@@ -99,11 +99,11 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 10.8 Phase 10 tests pass
 
 ## Phase 11: Failure Analyst and Report
-- [ ] 11.1 Analyst prompt and schema
-- [ ] 11.2 Analyst node (failed tests only), persist Failure
-- [ ] 11.3 Report node and report JSON
-- [ ] 11.4 Report endpoint and evidence endpoint
-- [ ] 11.5 Phase 11 tests pass (defective and correct builds)
+- [x] 11.1 Analyst prompt and schema
+- [x] 11.2 Analyst node (failed tests only), persist Failure
+- [x] 11.3 Report node and report JSON
+- [x] 11.4 Report endpoint and evidence endpoint
+- [x] 11.5 Phase 11 tests pass (defective and correct builds)
 
 ## Phase 12: Run and Report Frontend
 - [ ] 12.1 useRunStatus hook

@@ -206,7 +206,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
 
 
 async def analyze_node(state: AgentState) -> dict[str, Any]:
-    """Stub Analyst node: Evaluates failed tests."""
+    """Failure Analyst node: Evaluates failed tests only and persists Failure records."""
     run_id = uuid.UUID(state["run_id"])
     db_url = state.get("db_url")
     if await check_cancellation(state):
@@ -216,16 +216,82 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
 
-    # In Phase 8 stub, no failures by default
+    from sqlalchemy import select
+
+    from app.agent.analyst import analyze_test_failure
+    from app.models.test_run import Failure, TestResult
+
+    failures = []
+    session_factory = get_async_session_factory(db_url)
+    async with session_factory() as session:
+        # T11.2: Analyst runs only for failed tests
+        stmt = (
+            select(TestCase)
+            .where(TestCase.run_id == run_id, TestCase.status == "FAILED")
+            .order_by(TestCase.order_index)
+        )
+        failed_tcs = (await session.execute(stmt)).scalars().all()
+
+        for tc in failed_tcs:
+            if await check_cancellation(state):
+                return {"cancel_requested": True, "current_stage": "CANCELLED"}
+
+            # Load the corresponding test result
+            res_stmt = (
+                select(TestResult)
+                .where(TestResult.test_case_id == tc.id)
+                .order_by(TestResult.id.desc())
+            )
+            res = (await session.execute(res_stmt)).scalars().first()
+            steps = res.steps if res and res.steps else []
+            err_msg = res.error_message if res else None
+
+            analysis = await analyze_test_failure(
+                title=tc.title,
+                description=tc.description,
+                source_requirement=tc.source_requirement,
+                target_role=tc.target_role,
+                steps=steps,
+                error_message=err_msg,
+            )
+
+            db_failure = Failure(
+                test_case_id=tc.id,
+                classification=analysis.classification,
+                severity=analysis.severity,
+                confidence=analysis.confidence,
+                expected=analysis.expected,
+                observed=analysis.observed,
+                explanation=analysis.explanation,
+                suggested_action=analysis.suggested_action,
+            )
+            session.add(db_failure)
+
+            failures.append({
+                "test_case_id": str(tc.id),
+                "title": tc.title,
+                "source_requirement": tc.source_requirement,
+                "classification": analysis.classification,
+                "severity": analysis.severity,
+                "confidence": analysis.confidence,
+                "expected": analysis.expected,
+                "observed": analysis.observed,
+                "explanation": analysis.explanation,
+                "suggested_action": analysis.suggested_action,
+                "screenshot_path": res.screenshot_path if res else None,
+            })
+
+        await session.commit()
+
     return {
         "current_stage": "ANALYZING",
         "status": "ANALYZING",
-        "failures": [],
+        "failures": failures,
     }
 
 
 async def report_node(state: AgentState) -> dict[str, Any]:
-    """Stub Report node: Generates summary report."""
+    """Report Generator node: Generates complete metrics, breakdowns, and report JSON."""
     run_id = uuid.UUID(state["run_id"])
     db_url = state.get("db_url")
     if await check_cancellation(state):
@@ -235,13 +301,30 @@ async def report_node(state: AgentState) -> dict[str, Any]:
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
 
-    report_data = {
-        "total_tests": len(state.get("test_cases", [])),
-        "passed_tests": len(state.get("results", [])),
-        "failed_tests": len(state.get("failures", [])),
-        "pass_rate": 100.0,
-        "summary": "Stub execution completed successfully.",
-    }
+    from sqlalchemy import select
+
+    from app.agent.report import generate_run_report
+    from app.models.test_run import TestResult
+
+    session_factory = get_async_session_factory(db_url)
+    async with session_factory() as session:
+        tc_stmt = select(TestCase).where(TestCase.run_id == run_id).order_by(TestCase.order_index)
+        tcs = (await session.execute(tc_stmt)).scalars().all()
+        tcs_data = [{"id": str(tc.id), "status": tc.status, "title": tc.title} for tc in tcs]
+
+        res_stmt = (
+            select(TestResult)
+            .join(TestCase, TestResult.test_case_id == TestCase.id)
+            .where(TestCase.run_id == run_id)
+        )
+        results = (await session.execute(res_stmt)).scalars().all()
+        results_data = [{"status": r.status, "test_case_id": str(r.test_case_id)} for r in results]
+
+    report_data = generate_run_report(
+        test_cases=tcs_data,
+        results=results_data,
+        failures=state.get("failures", []),
+    )
 
     await update_run_in_db(run_id, report=report_data, db_url=db_url)
 
