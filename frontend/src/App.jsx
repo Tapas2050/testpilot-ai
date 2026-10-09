@@ -6,6 +6,8 @@ import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
 import { ProjectPage } from './pages/ProjectPage';
+import { TestRunPage } from './pages/TestRunPage';
+import { ReportPage } from './pages/ReportPage';
 
 function App() {
   return (
@@ -27,6 +29,30 @@ function App() {
             element={
               <ProtectedRoute>
                 <ProjectPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects/:projectId/runs/:id"
+            element={
+              <ProtectedRoute>
+                <TestRunPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/runs/:id"
+            element={
+              <ProtectedRoute>
+                <TestRunPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/runs/:id/report"
+            element={
+              <ProtectedRoute>
+                <ReportPage />
               </ProtectedRoute>
             }
           />

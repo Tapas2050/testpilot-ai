@@ -106,12 +106,12 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 11.5 Phase 11 tests pass (defective and correct builds)
 
 ## Phase 12: Run and Report Frontend
-- [ ] 12.1 useRunStatus hook
-- [ ] 12.2 Test Run page (stepper, progress, plan, results, activity feed, cancel)
-- [ ] 12.3 Report page (tiles, severity, failures, screenshots)
-- [ ] 12.4 Run history on Project page
-- [ ] 12.5 Banners and all states
-- [ ] 12.6 Phase 12 tests pass and manual end-to-end check
+- [x] 12.1 useRunStatus hook
+- [x] 12.2 Test Run page (stepper, progress, plan, results, activity feed, cancel)
+- [x] 12.3 Report page (tiles, severity, failures, screenshots)
+- [x] 12.4 Run history on Project page
+- [x] 12.5 Banners and all states
+- [x] 12.6 Phase 12 tests pass and manual end-to-end check
 
 ## Phase 13: Hardening and Demo Readiness
 - [ ] 13.1 Rate limiting on login and run creation

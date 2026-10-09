@@ -37,8 +37,13 @@ export function ProjectPage() {
       const docs = await api.documents.list(id);
       setDocuments(docs);
 
-      // Runs will be hooked in Phase 8
-      setRuns([]);
+      try {
+        const runList = await api.runs.list(id);
+        setRuns(runList);
+      } catch {
+        // Run list endpoint fallback
+        setRuns([]);
+      }
     } catch (err) {
       setError(err.message || 'Failed to load project');
     } finally {
@@ -107,6 +112,21 @@ export function ProjectPage() {
       } catch (err) {
         alert(err.message || 'Failed to delete document');
       }
+    }
+  };
+
+  const [startingRun, setStartingRun] = useState(false);
+
+  const handleStartRun = async () => {
+    if (documents.length === 0) return;
+    try {
+      setStartingRun(true);
+      const newRun = await api.runs.create(id);
+      navigate(`/projects/${id}/runs/${newRun.id}`);
+    } catch (err) {
+      alert(err.message || 'Failed to start test run');
+    } finally {
+      setStartingRun(false);
     }
   };
 
@@ -339,12 +359,13 @@ export function ProjectPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h2>Test Runs</h2>
                 <button
+                  onClick={handleStartRun}
+                  disabled={documents.length === 0 || startingRun}
                   className="btn btn-primary"
-                  disabled={documents.length === 0}
                   title={documents.length === 0 ? 'Upload requirements to enable test runs' : 'Start a new test run'}
                   data-testid="start-run-btn"
                 >
-                  Start Test Run
+                  {startingRun ? 'Starting Run...' : 'Start Test Run'}
                 </button>
               </div>
 
@@ -353,8 +374,72 @@ export function ProjectPage() {
                   No runs yet. Start your first test run.
                 </div>
               ) : (
-                <div>
-                  {/* Test runs list */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {runs.map((r) => {
+                    const statusClass = {
+                      COMPLETED: 'badge-pass',
+                      FAILED: 'badge-fail',
+                      RUNNING: 'badge-info',
+                      CANCELLED: 'badge-secondary',
+                      QUEUED: 'badge-warning',
+                    }[r.status] || 'badge-secondary';
+
+                    return (
+                      <div
+                        key={r.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '12px 16px',
+                          backgroundColor: '#FFFFFF',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '6px',
+                        }}
+                        data-testid={`run-row-${r.id}`}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                            <Link
+                              to={`/projects/${id}/runs/${r.id}`}
+                              style={{ fontWeight: 600, color: 'var(--accent-color)', textDecoration: 'none' }}
+                            >
+                              Run #{r.id.slice(0, 8)}
+                            </Link>
+                            <span className={`badge ${statusClass}`}>{r.status}</span>
+                            {r.report && (
+                              <span style={{ fontSize: '12px', fontWeight: 600, color: '#16A34A' }}>
+                                {r.report.pass_percentage ?? r.report.pass_rate}% pass
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            Stage: {r.agent_stage} •{' '}
+                            {r.started_at ? new Date(r.started_at).toLocaleString() : 'Not started'}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <Link
+                            to={`/projects/${id}/runs/${r.id}`}
+                            className="btn btn-secondary"
+                            style={{ padding: '6px 10px', fontSize: '12px', textDecoration: 'none' }}
+                          >
+                            View Run
+                          </Link>
+                          {r.status === 'COMPLETED' && (
+                            <Link
+                              to={`/runs/${r.id}/report`}
+                              className="btn btn-primary"
+                              style={{ padding: '6px 10px', fontSize: '12px', textDecoration: 'none' }}
+                            >
+                              Report
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

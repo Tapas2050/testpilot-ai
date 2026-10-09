@@ -18,9 +18,9 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Phase 11 complete (Failure Analyst and Report)
-- Last completed task: 11.5
-- Next task: 12.1 (Phase 12: Run and Report Frontend)
+- Current phase: Phase 12 complete (Run and Report Frontend)
+- Last completed task: 12.6
+- Next task: 13.1 (Phase 13: Hardening and Demo Readiness)
 - Date of last update: 2026-10-10
 
 ## 4. Environment Facts (verified)
@@ -28,11 +28,11 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations applied to `testpilot`.
 - Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0` (verified live ping in Python). Requires `sudo service redis-server start` in WSL terminal.
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv` (system Python 3.14 bypassed), Node v24.19.0, npm 11.17.0, Git 2.55.0.
-- Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 7 passed.
+- Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 11 passed (7 auth & project tests + 4 run and report tests). Build bundle cleanly generated.
 - SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded demo credentials, toggleable planted defects via `SUPPORTDESK_DEFECTS`. All 3 tests (T7.1, T7.2, T7.3) pass cleanly.
 - LangGraph agent foundation, Planner, Executor, Failure Analyst, and Report Generator verified.
-- Phase 11 eval test `test_t11_5_eval_defective_build_reports_planted_defects` verified on live LLM: 3/3 planted defects found and classified as `PRODUCT_BUG`.
-- All Phase 1 through Phase 11 tests pass cleanly: 78 backend unit/integration tests + 3 SupportDesk tests + 7 frontend tests = 88 tests passing (plus 3 live evals). Ruff clean on both projects.
+- Complete frontend UI for all 6 screens per DESIGN.md: Login, Register, Dashboard, Project page (with documents, credentials, and run history), Test Run page (with stage stepper, activity feed, and expandable tests), and Report page (with stats, severity breakdown, failure cards, and screenshot evidence viewer).
+- All Phase 1 through Phase 12 tests pass cleanly: 78 backend unit/integration tests + 3 SupportDesk tests + 11 frontend tests = 92 tests passing (plus 3 live evals). Ruff clean on both backend and supportdesk; lint clean on frontend.
 - Live LLM calls logged: 1 in T9.7, 1 in T11.5 (plus 2 pre-implementation smoke tests). Zero quota issues encountered.
 
 ## 5. Conventions in Use

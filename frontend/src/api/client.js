@@ -111,6 +111,27 @@ export const api = {
         method: 'DELETE',
       }),
   },
+  runs: {
+    create: (projectId) =>
+      request(`/projects/${projectId}/runs`, {
+        method: 'POST',
+      }),
+    list: (projectId) => request(`/projects/${projectId}/runs`),
+    get: (runId) => request(`/runs/${runId}`),
+    cancel: (runId) =>
+      request(`/runs/${runId}/cancel`, {
+        method: 'POST',
+      }),
+    report: (runId) => request(`/runs/${runId}/report`),
+    fetchScreenshotBlob: async (runId, filename) => {
+      const token = sessionStorage.getItem('testpilot_token') || localStorage.getItem('testpilot_token');
+      const res = await fetch(`${API_BASE_URL}/runs/${runId}/screenshots/${filename}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error('Failed to load screenshot');
+      return await res.blob();
+    },
+  },
 };
 
 export { ApiError };
