@@ -18,22 +18,29 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Phase 12 complete (Run and Report Frontend)
-- Last completed task: 12.6
-- Next task: 13.1 (Phase 13: Hardening and Demo Readiness)
+- Current phase: Phase 13 complete (Hardening and Demo Readiness) - ALL PHASES 1-13 COMPLETE
+- Last completed task: 13.8
+- Next task: Review docs/FINAL_REPORT.md and human checklist
 - Date of last update: 2026-10-10
 
 ## 4. Environment Facts (verified)
-- Hardware: 8 GB RAM (about 83% used at idle), Intel Iris Xe integrated GPU, no dedicated GPU. Ollama installed with qwen3:1.7b only (not used by project, D-003). Memory budget rules in D-018.
+- Hardware: 8 GB RAM (about 83% used at idle), Intel Iris Xe integrated GPU, no dedicated GPU. Memory budget rules in D-018 respected throughout.
 - Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations applied to `testpilot`.
-- Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0` (verified live ping in Python). Requires `sudo service redis-server start` in WSL terminal.
-- Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv` (system Python 3.14 bypassed), Node v24.19.0, npm 11.17.0, Git 2.55.0.
+- Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0`.
+- Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv`, Node v24.19.0, npm 11.17.0, Git 2.55.0.
 - Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 11 passed (7 auth & project tests + 4 run and report tests). Build bundle cleanly generated.
 - SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded demo credentials, toggleable planted defects via `SUPPORTDESK_DEFECTS`. All 3 tests (T7.1, T7.2, T7.3) pass cleanly.
 - LangGraph agent foundation, Planner, Executor, Failure Analyst, and Report Generator verified.
-- Complete frontend UI for all 6 screens per DESIGN.md: Login, Register, Dashboard, Project page (with documents, credentials, and run history), Test Run page (with stage stepper, activity feed, and expandable tests), and Report page (with stats, severity breakdown, failure cards, and screenshot evidence viewer).
-- All Phase 1 through Phase 12 tests pass cleanly: 78 backend unit/integration tests + 3 SupportDesk tests + 11 frontend tests = 92 tests passing (plus 3 live evals). Ruff clean on both backend and supportdesk; lint clean on frontend.
-- Live LLM calls logged: 1 in T9.7, 1 in T11.5 (plus 2 pre-implementation smoke tests). Zero quota issues encountered.
+- Complete frontend UI for all 6 screens per DESIGN.md: Login, Register, Dashboard, Project page, Test Run page, and Report page.
+- Hardening & Security (Phase 13):
+  - Redis fixed-window rate limiter: 10/min on `/auth/login`, 5/min on `POST /projects/{id}/runs` with 429 and Retry-After header.
+  - Cross-user test suite (T13.2): 4/4 tests pass (projects, credentials, documents, runs/reports refuse cross-user access with 404).
+  - Credential leak audit (T13.3): 2/2 tests pass (database, logs, API responses contain no plaintext secrets or credentials).
+  - Error hardening (T13.4): 2/2 tests pass (missing/invalid LLM key & exhausted provider quota cleanly transition run to FAILED).
+  - Structured logging with `run_id` contextvar and sensitive data masking.
+  - Demo seed script (`backend/scripts/seed_demo.py`): seeds user, project, credentials, and 11 pgvector chunks.
+- Test counts: 88 backend unit/integration tests + 3 SupportDesk tests + 11 frontend tests = 102 automated tests passing cleanly (plus 3 live evals).
+- Ruff clean on backend and supportdesk; lint and build clean on frontend.
 
 ## 5. Conventions in Use
 - uv project inside `backend/` with `[tool.uv] package = false`.

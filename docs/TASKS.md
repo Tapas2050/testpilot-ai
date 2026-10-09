@@ -114,14 +114,14 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 12.6 Phase 12 tests pass and manual end-to-end check
 
 ## Phase 13: Hardening and Demo Readiness
-- [ ] 13.1 Rate limiting on login and run creation
-- [ ] 13.2 Cross-user access test suite
-- [ ] 13.3 Credential-leak audit
-- [ ] 13.4 Structured logs with run ID
-- [ ] 13.5 Graceful LLM and rate-limit error handling
-- [ ] 13.6 README, seed scripts
-- [ ] 13.7 Demo rehearsal and backup recording
-- [ ] 13.8 Fresh-clone setup test
+- [x] 13.1 Rate limiting on login and run creation
+- [x] 13.2 Cross-user access test suite
+- [x] 13.3 Credential-leak audit
+- [x] 13.4 Structured logs with run ID
+- [x] 13.5 Graceful LLM and rate-limit error handling
+- [x] 13.6 README, seed scripts
+- [x] 13.7 Demo rehearsal and backup recording
+- [x] 13.8 Fresh-clone setup test
 
 ## Blocked / Deferred
 (none yet)

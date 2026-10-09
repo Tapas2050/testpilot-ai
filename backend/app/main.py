@@ -12,7 +12,11 @@ from app.api.health import router as health_router
 from app.api.projects import router as projects_router
 from app.api.runs import router as runs_router
 from app.core.database import engine
+from app.core.logging import setup_structured_logging
 from app.core.redis import close_redis
+
+# Initialize structured logging on module load
+setup_structured_logging()
 
 
 @asynccontextmanager

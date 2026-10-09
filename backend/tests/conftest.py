@@ -1,6 +1,7 @@
 """Test configuration, fixtures, and database isolation for pytest."""
 
 import asyncio
+import uuid
 from typing import AsyncGenerator
 
 import pytest
@@ -81,6 +82,30 @@ async def truncate_tables():
 
 
 @pytest.fixture(autouse=True)
+async def clear_redis_rate_limits():
+    """Clear Redis rate limit keys before and after each test to prevent test cross-pollution."""
+    try:
+        from app.core.redis import get_redis_client
+
+        redis = get_redis_client()
+        keys = await redis.keys("rate_limit:*")
+        if keys:
+            await redis.delete(*keys)
+    except Exception:
+        pass
+    yield
+    try:
+        from app.core.redis import get_redis_client
+
+        redis = get_redis_client()
+        keys = await redis.keys("rate_limit:*")
+        if keys:
+            await redis.delete(*keys)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def override_db_dependency():
     """Override FastAPI get_db dependency to always use the test database."""
 
@@ -105,3 +130,44 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     """Async HTTP client pointing to the FastAPI test application."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture
+async def auth_headers(
+    client: AsyncClient, db_session: AsyncSession
+) -> tuple[dict[str, str], uuid.UUID, uuid.UUID]:
+    """Register a user, create a project, and return headers, user_id, and project_id."""
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.models.user import User
+
+    email = f"test.user.{uuid.uuid4().hex[:8]}@example.com"
+    pwd = "SecurePassword123!"
+    reg_resp = await client.post(
+        "/auth/register",
+        json={"email": email, "password": pwd},
+    )
+    assert reg_resp.status_code == 201
+
+    login_resp = await client.post(
+        "/auth/login",
+        json={"email": email, "password": pwd},
+    )
+    assert login_resp.status_code == 200
+    token = login_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    proj_resp = await client.post(
+        "/projects",
+        json={"name": "Test Project", "target_url": "http://localhost:8001"},
+        headers=headers,
+    )
+    assert proj_resp.status_code == 201
+    proj_id = uuid.UUID(proj_resp.json()["id"])
+
+    user_stmt = select(User).where(User.email == email)
+    user = (await db_session.execute(user_stmt)).scalar_one()
+
+    return headers, user.id, proj_id

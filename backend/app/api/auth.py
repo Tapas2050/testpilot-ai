@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_current_user_and_session
 from app.core.database import get_db
+from app.core.rate_limit import rate_limit_login
 from app.models.session import UserSession
 from app.models.user import User
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
@@ -37,6 +38,7 @@ async def register(
     "/login",
     response_model=TokenResponse,
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(rate_limit_login)],
     summary="User login",
 )
 async def login(
