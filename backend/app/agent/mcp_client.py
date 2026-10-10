@@ -151,12 +151,16 @@ class PlaywrightMCPClient:
                 "Ensure 'npm install' was run in mcp/ directory."
             )
 
+        mcp_cwd = self.server_path.parent.parent.parent.parent
+        cwd = str(mcp_cwd) if mcp_cwd.exists() else None
+
         self._process = await asyncio.create_subprocess_exec(
             self.node_path,
             str(self.server_path),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
         )
         if self._process.pid:
             _all_running_pids.add(self._process.pid)
@@ -174,7 +178,7 @@ class PlaywrightMCPClient:
             },
         }
         await self._write_msg(init_msg)
-        await self._read_response(self._req_id, timeout=15.0)
+        await self._read_response(self._req_id, timeout=25.0)
 
         # Handshake step 2: notifications/initialized
         notify_msg = {"jsonrpc": "2.0", "method": "notifications/initialized"}
@@ -201,10 +205,15 @@ class PlaywrightMCPClient:
                     f"MCP timed out waiting for response ID {expected_id} after {timeout}s"
                 )
 
-            line_bytes = await asyncio.wait_for(
-                self._process.stdout.readline(),
-                timeout=time_left,
-            )
+            try:
+                line_bytes = await asyncio.wait_for(
+                    self._process.stdout.readline(),
+                    timeout=time_left,
+                )
+            except (asyncio.TimeoutError, TimeoutError):
+                raise asyncio.TimeoutError(
+                    f"MCP timed out waiting for response ID {expected_id} after {timeout}s"
+                )
             if not line_bytes:
                 stderr_output = ""
                 if self._process.stderr:
@@ -242,8 +251,14 @@ class PlaywrightMCPClient:
             _all_running_pids.discard(pid)
             kill_process_tree(pid)
             try:
+                if self._process.stdin and not self._process.stdin.is_closing():
+                    self._process.stdin.close()
+            except Exception:
+                pass
+            try:
                 if self._process.returncode is None:
                     self._process.kill()
+                await asyncio.wait_for(self._process.wait(), timeout=2.0)
             except Exception:
                 pass
             self._process = None
