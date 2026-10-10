@@ -1,5 +1,6 @@
 """LangGraph agent orchestration graph with stub nodes for Phase 8."""
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -7,6 +8,7 @@ from typing import Any, Optional
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.checkpointer import get_checkpointer
+from app.agent.llm import get_live_call_count
 from app.agent.state import AgentState
 from app.core.database import get_async_session_factory
 from app.models.test_run import TestCase
@@ -17,6 +19,8 @@ from app.services.run_service import (
     update_live_progress,
     update_run_in_db,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def check_cancellation(state: AgentState) -> bool:
@@ -39,6 +43,7 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
         return {"cancel_requested": True, "current_stage": "CANCELLED"}
 
     stage = "PLANNING"
+    logger.info("[run_id=%s] Stage changed to PLANNING", run_id)
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
     await update_live_progress(run_id, stage=stage, total_tests=0, completed_tests=0)
@@ -135,6 +140,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
         return {"cancel_requested": True, "current_stage": "CANCELLED"}
 
     stage = "EXECUTING"
+    logger.info("[run_id=%s] Stage changed to EXECUTING", run_id)
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
 
@@ -202,6 +208,13 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                 tc.status = "RUNNING"
                 session.add(tc)
                 await session.commit()
+                logger.info(
+                    "[run_id=%s] Test started: %s (id=%s, role=%s)",
+                    run_id,
+                    tc.title,
+                    tc.id,
+                    tc.target_role,
+                )
                 await update_live_progress(
                     run_id,
                     stage=stage,
@@ -222,6 +235,13 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                 session.add(tc)
                 session.add(result)
                 results.append({"test_case_id": str(tc.id), "status": result.status})
+                logger.info(
+                    "[run_id=%s] Test ended: %s (id=%s) -> status=%s",
+                    run_id,
+                    tc.title,
+                    tc.id,
+                    result.status,
+                )
 
                 is_auth_failure = (
                     result.status == "BLOCKED"
@@ -314,6 +334,7 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
         return {"cancel_requested": True, "current_stage": "CANCELLED"}
 
     stage = "ANALYZING"
+    logger.info("[run_id=%s] Stage changed to ANALYZING", run_id)
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
     await update_live_progress(run_id, stage=stage)
@@ -400,6 +421,7 @@ async def report_node(state: AgentState) -> dict[str, Any]:
         return {"cancel_requested": True, "current_stage": "CANCELLED"}
 
     stage = "REPORTING"
+    logger.info("[run_id=%s] Stage changed to REPORTING", run_id)
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
     await update_live_progress(run_id, stage=stage)
@@ -457,6 +479,7 @@ async def complete_node(state: AgentState) -> dict[str, Any]:
             "Authentication failed for all executed tests. "
             "Please check the project's saved credentials in Project Settings."
         )
+        logger.info("[run_id=%s] Stage changed to %s (error=%s)", run_id, status, err_msg)
         await update_run_in_db(
             run_id,
             status=status,
@@ -474,6 +497,7 @@ async def complete_node(state: AgentState) -> dict[str, Any]:
         }
 
     status = "COMPLETED"
+    logger.info("[run_id=%s] Stage changed to %s", run_id, status)
     await update_run_in_db(run_id, status=status, completed_at=now, db_url=db_url)
     await cache_run_status(run_id, status=status, stage=status)
     await update_live_progress(run_id, stage=status)
@@ -491,6 +515,7 @@ async def cancel_node(state: AgentState) -> dict[str, Any]:
     db_url = state.get("db_url")
     now = datetime.now(timezone.utc)
     status = "CANCELLED"
+    logger.info("[run_id=%s] Stage changed to %s", run_id, status)
 
     await update_run_in_db(
         run_id, status=status, completed_at=now, cancel_requested=True, db_url=db_url
@@ -566,6 +591,7 @@ async def execute_agent_run(
         "cancel_requested": False,
     }
 
+    logger.info("[run_id=%s] Agent run started for project %s", run_id, project_id)
     try:
         # Check if forced failure requested for testing T8.3
         if force_fail_at == "start":
@@ -577,6 +603,7 @@ async def execute_agent_run(
 
     except Exception as exc:
         err_msg = str(exc)
+        logger.error("[run_id=%s] Agent run failed with exception: %s", run_id, err_msg)
         status = "FAILED"
         now = datetime.now(timezone.utc)
         await update_run_in_db(
@@ -586,3 +613,9 @@ async def execute_agent_run(
         await update_live_progress(run_id, stage=status)
         await release_run_lock(project_id)
         # We catch and do not re-raise so worker task completes cleanly and API stays up
+    finally:
+        logger.info(
+            "[run_id=%s] Agent run finished. Total live LLM calls: %d",
+            run_id,
+            get_live_call_count(),
+        )

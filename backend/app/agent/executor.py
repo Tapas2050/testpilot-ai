@@ -182,6 +182,11 @@ async def execute_single_test_case(
             login_step["test_key"] = getattr(test_case, "test_key", "")
             steps_taken.append(login_step)
             clean_login = sanitize_steps([login_step], secrets_to_redact)[0]
+            logger.info(
+                "[run_id=%s] Step login executed: action=login, status=%s",
+                run_id,
+                clean_login.get("status", "ok"),
+            )
             await append_live_step_event(run_id, clean_login)
             await update_live_progress(run_id, current_step=1)
             step_num += 1
@@ -235,6 +240,11 @@ async def execute_single_test_case(
                     }
                     steps_taken.append(loop_step)
                     clean_loop = sanitize_steps([loop_step], secrets_to_redact)[0]
+                    logger.info(
+                        "[run_id=%s] Step %d executed: action=loop_detected, status=FAILED",
+                        run_id,
+                        step_num,
+                    )
                     await append_live_step_event(run_id, clean_loop)
                     await update_live_progress(run_id, current_step=step_num)
                     break
@@ -307,6 +317,11 @@ Decide the next browser action to execute the test scenario, or finish if the re
                     }
                     steps_taken.append(loop_step)
                     clean_loop = sanitize_steps([loop_step], secrets_to_redact)[0]
+                    logger.info(
+                        "[run_id=%s] Step %d executed: action=loop_detected, status=FAILED",
+                        run_id,
+                        step_num,
+                    )
                     await append_live_step_event(run_id, clean_loop)
                     await update_live_progress(run_id, current_step=step_num)
                     break
@@ -325,6 +340,13 @@ Decide the next browser action to execute the test scenario, or finish if the re
                     }
                     steps_taken.append(finish_step)
                     clean_finish = sanitize_steps([finish_step], secrets_to_redact)[0]
+                    logger.info(
+                        "[run_id=%s] Step %d executed: action=finish, status=%s, result=%s",
+                        run_id,
+                        step_num,
+                        status,
+                        clean_finish.get("observation", "Test completed"),
+                    )
                     await append_live_step_event(run_id, clean_finish)
                     await update_live_progress(run_id, current_step=step_num)
                     break
@@ -379,6 +401,13 @@ Decide the next browser action to execute the test scenario, or finish if the re
 
                 steps_taken.append(step_entry)
                 clean_step = sanitize_steps([step_entry], secrets_to_redact)[0]
+                logger.info(
+                    "[run_id=%s] Step %d executed: action=%s, status=%s",
+                    run_id,
+                    step_num,
+                    clean_step.get("action", ""),
+                    clean_step.get("status", "ok"),
+                )
                 await append_live_step_event(run_id, clean_step)
                 await update_live_progress(run_id, current_step=step_num)
                 step_num += 1

@@ -56,3 +56,22 @@ def test_settings_refuses_short_jwt_secret():
             _env_file=None,
         )
     assert any("JWT_SECRET" in str(err) for err in exc_info.value.errors())
+
+
+def test_part5_settings_defaults_and_lock_ttl():
+    """Part 5: Verify default model is gemini-3.5-flash-lite, RPM is 12,
+    timeout is 1800, and lock TTL exceeds timeout.
+    """
+    from app.services.run_service import get_lock_ttl_seconds
+
+    settings = Settings(
+        DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/test",
+        JWT_SECRET="a" * 32,
+        _env_file=None,
+    )
+    assert settings.GOOGLE_MODEL == "gemini-3.5-flash-lite"
+    assert settings.LLM_REQUESTS_PER_MINUTE == 12
+    assert settings.RUN_TIMEOUT_SECONDS == 1800
+
+    lock_ttl = get_lock_ttl_seconds()
+    assert lock_ttl > settings.RUN_TIMEOUT_SECONDS

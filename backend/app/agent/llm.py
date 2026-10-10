@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+import warnings
 from typing import Any, Optional, Type
 
 from langchain_core.language_models import BaseChatModel
@@ -11,6 +12,9 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+
+# Filter temperature deprecation/unsupported warnings for models that ignore it
+warnings.filterwarnings("ignore", message=".*temperature.*")
 
 logger = logging.getLogger(__name__)
 
@@ -58,15 +62,24 @@ async def enforce_rate_limit() -> None:
     _live_call_count += 1
 
 
+def _model_supports_temperature(model_name: str) -> bool:
+    """Return False if model is known to ignore temperature (e.g. gemini-3.5-flash-lite)."""
+    m = model_name.lower()
+    return not ("3.5" in m or "lite" in m or "thinking" in m)
+
+
 def get_primary_llm(temperature: float = 0.0) -> BaseChatModel:
     """Build primary Gemini chat model."""
     settings = get_settings()
-    return ChatGoogleGenerativeAI(
-        model=settings.GOOGLE_MODEL,
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=temperature,
-        max_retries=settings.LLM_MAX_RETRIES,
-    )
+    model_name = settings.GOOGLE_MODEL or "gemini-3.5-flash-lite"
+    kwargs: dict[str, Any] = {
+        "model": model_name,
+        "google_api_key": settings.GOOGLE_API_KEY,
+        "max_retries": settings.LLM_MAX_RETRIES,
+    }
+    if _model_supports_temperature(model_name):
+        kwargs["temperature"] = temperature
+    return ChatGoogleGenerativeAI(**kwargs)
 
 
 def get_fallback_google_llm(temperature: float = 0.0) -> Optional[BaseChatModel]:
@@ -74,12 +87,15 @@ def get_fallback_google_llm(temperature: float = 0.0) -> Optional[BaseChatModel]
     settings = get_settings()
     if not settings.GOOGLE_FALLBACK_MODEL or not settings.GOOGLE_API_KEY:
         return None
-    return ChatGoogleGenerativeAI(
-        model=settings.GOOGLE_FALLBACK_MODEL,
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=temperature,
-        max_retries=settings.LLM_MAX_RETRIES,
-    )
+    model_name = settings.GOOGLE_FALLBACK_MODEL
+    kwargs: dict[str, Any] = {
+        "model": model_name,
+        "google_api_key": settings.GOOGLE_API_KEY,
+        "max_retries": settings.LLM_MAX_RETRIES,
+    }
+    if _model_supports_temperature(model_name):
+        kwargs["temperature"] = temperature
+    return ChatGoogleGenerativeAI(**kwargs)
 
 
 def get_openrouter_llm(temperature: float = 0.0) -> Optional[BaseChatModel]:

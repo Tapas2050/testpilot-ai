@@ -44,12 +44,12 @@ class Settings(BaseSettings):
 
     # LLM
     GOOGLE_API_KEY: str = Field("", description="Google AI Studio API key")
-    GOOGLE_MODEL: str = Field("gemini-2.5-flash", description="Google Gemini model")
+    GOOGLE_MODEL: str = Field("gemini-3.5-flash-lite", description="Google Gemini model")
     GOOGLE_FALLBACK_MODEL: str = Field("", description="Google Gemini fallback model")
     OPENROUTER_API_KEY: str = Field("", description="OpenRouter API key")
     OPENROUTER_MODEL: str = Field("", description="OpenRouter model")
     LLM_MAX_RETRIES: int = Field(3, description="Max LLM retry attempts")
-    LLM_REQUESTS_PER_MINUTE: int = Field(15, description="Rate limit requests per minute")
+    LLM_REQUESTS_PER_MINUTE: int = Field(12, description="Rate limit requests per minute")
 
     # Embeddings
     EMBEDDING_MODEL: str = Field(
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     MAX_TESTS_PER_RUN: int = Field(8, description="Max tests planned per run")
     MAX_STEPS_PER_TEST: int = Field(15, description="Max steps per test case")
     TEST_TIMEOUT_SECONDS: int = Field(120, description="Per-test timeout in seconds")
-    RUN_TIMEOUT_SECONDS: int = Field(900, description="Total run timeout in seconds")
+    RUN_TIMEOUT_SECONDS: int = Field(1800, description="Total run timeout in seconds")
 
     # SupportDesk (demo target)
     SUPPORTDESK_URL: str = Field("http://localhost:8001", description="SupportDesk base URL")

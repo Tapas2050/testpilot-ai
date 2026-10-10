@@ -1,6 +1,7 @@
 """arq background worker definitions for executing TestPilot agent runs."""
 
 import asyncio
+import logging
 import uuid
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -8,7 +9,10 @@ from urllib.parse import urlparse
 from arq.connections import RedisSettings, create_pool
 
 from app.agent.graph import execute_agent_run
+from app.agent.llm import get_live_call_count
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 async def run_agent_job(
@@ -21,17 +25,26 @@ async def run_agent_job(
     """Worker task executed by arq."""
     run_id = uuid.UUID(run_id_str)
     project_id = uuid.UUID(project_id_str)
+    logger.info("[run_id=%s] Worker started job for project %s", run_id, project_id)
+
     # Fall back to settings.DATABASE_URL if password was masked with '***'
     if db_url and ":***@" in db_url:
         settings = get_settings()
         db_url = str(settings.DATABASE_URL)
 
-    await execute_agent_run(
-        run_id=run_id,
-        project_id=project_id,
-        db_url=db_url,
-        force_fail_at=force_fail_at,
-    )
+    try:
+        await execute_agent_run(
+            run_id=run_id,
+            project_id=project_id,
+            db_url=db_url,
+            force_fail_at=force_fail_at,
+        )
+    finally:
+        logger.info(
+            "[run_id=%s] Worker completed job. Total live LLM calls: %d",
+            run_id,
+            get_live_call_count(),
+        )
 
 
 def get_redis_settings() -> RedisSettings:

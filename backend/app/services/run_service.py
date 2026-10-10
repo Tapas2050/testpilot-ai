@@ -10,17 +10,23 @@ from typing import Any, Optional
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.models.test_run import TestRun
 
-LOCK_TTL_SECONDS = 1800  # 30 minutes
+
+def get_lock_ttl_seconds() -> int:
+    """Return Redis lock and cache TTL that is strictly longer than RUN_TIMEOUT_SECONDS."""
+    settings = get_settings()
+    return max(settings.RUN_TIMEOUT_SECONDS + 300, 2100)
 
 
 async def acquire_run_lock(project_id: uuid.UUID, run_id: uuid.UUID) -> bool:
     """Acquire a per-project run lock in Redis. Returns True if acquired, False if locked."""
     redis = get_redis_client()
     lock_key = f"project_run_lock:{project_id}"
-    acquired = await redis.set(lock_key, str(run_id), nx=True, ex=LOCK_TTL_SECONDS)
+    ttl = get_lock_ttl_seconds()
+    acquired = await redis.set(lock_key, str(run_id), nx=True, ex=ttl)
     return bool(acquired)
 
 
@@ -34,7 +40,8 @@ async def release_run_lock(project_id: uuid.UUID) -> None:
 async def set_cancel_flag(run_id: uuid.UUID) -> None:
     """Set cancellation flag in Redis for fast polling by running agent nodes."""
     redis = get_redis_client()
-    await redis.set(f"run_cancel:{run_id}", "1", ex=LOCK_TTL_SECONDS)
+    ttl = get_lock_ttl_seconds()
+    await redis.set(f"run_cancel:{run_id}", "1", ex=ttl)
 
 
 async def is_cancel_flag_set(run_id: uuid.UUID) -> bool:
