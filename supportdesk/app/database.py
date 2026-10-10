@@ -58,12 +58,12 @@ def init_db(seed: bool = True) -> None:
         settings = get_settings()
         # Seed Admin
         cursor.execute(
-            "INSERT OR IGNORE INTO users (email, password, role) VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO users (email, password, role) VALUES (?, ?, ?)",
             (settings.SUPPORTDESK_ADMIN_EMAIL, settings.SUPPORTDESK_ADMIN_PASSWORD, "admin"),
         )
         # Seed Agent
         cursor.execute(
-            "INSERT OR IGNORE INTO users (email, password, role) VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO users (email, password, role) VALUES (?, ?, ?)",
             (settings.SUPPORTDESK_AGENT_EMAIL, settings.SUPPORTDESK_AGENT_PASSWORD, "agent"),
         )
 

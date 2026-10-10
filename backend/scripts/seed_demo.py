@@ -30,6 +30,15 @@ from app.services.rag_service import RAGService
 
 async def seed():
     settings = get_settings()
+    if not settings.SUPPORTDESK_ADMIN_PASSWORD or not settings.SUPPORTDESK_ADMIN_PASSWORD.strip():
+        raise ValueError(
+            "Missing or empty required environment variable: SUPPORTDESK_ADMIN_PASSWORD"
+        )
+    if not settings.SUPPORTDESK_AGENT_PASSWORD or not settings.SUPPORTDESK_AGENT_PASSWORD.strip():
+        raise ValueError(
+            "Missing or empty required environment variable: SUPPORTDESK_AGENT_PASSWORD"
+        )
+
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -67,41 +76,57 @@ async def seed():
                 user_id=user.id,
                 name="SupportDesk Demo",
                 description="Demo help desk portal with planted defect detection scenarios.",
-                target_url="http://localhost:8001",
+                target_url=settings.SUPPORTDESK_URL,
                 created_at=datetime.now(timezone.utc),
             )
             db.add(project)
             await db.flush()
             print(f"[+] Created demo project: SupportDesk Demo ({project.target_url})")
         else:
-            print(f"[*] Demo project exists: {project.name}")
+            if project.target_url != settings.SUPPORTDESK_URL:
+                project.target_url = settings.SUPPORTDESK_URL
+                db.add(project)
+                await db.flush()
+            print(f"[*] Demo project exists: {project.name} ({project.target_url})")
 
-        # 3. Seed test credentials
+        # 3. Seed test credentials from root .env
         cred_stmt = select(ProjectCredential).where(ProjectCredential.project_id == project.id)
         existing_creds = (await db.execute(cred_stmt)).scalars().all()
-        roles_present = {c.role_label for c in existing_creds}
+        creds_by_role = {c.role_label: c for c in existing_creds}
 
-        if "admin" not in roles_present:
+        admin_cred = creds_by_role.get("admin")
+        if not admin_cred:
             admin_cred = ProjectCredential(
                 id=uuid.uuid4(),
                 project_id=project.id,
                 role_label="admin",
-                username="admin",
-                password_encrypted=encrypt_credential("AdminPassword123!"),
+                username=settings.SUPPORTDESK_ADMIN_EMAIL,
+                password_encrypted=encrypt_credential(settings.SUPPORTDESK_ADMIN_PASSWORD),
             )
             db.add(admin_cred)
             print("[+] Seeded encrypted admin credential")
+        else:
+            admin_cred.username = settings.SUPPORTDESK_ADMIN_EMAIL
+            admin_cred.password_encrypted = encrypt_credential(settings.SUPPORTDESK_ADMIN_PASSWORD)
+            db.add(admin_cred)
+            print("[*] Updated encrypted admin credential")
 
-        if "agent" not in roles_present:
+        agent_cred = creds_by_role.get("agent")
+        if not agent_cred:
             agent_cred = ProjectCredential(
                 id=uuid.uuid4(),
                 project_id=project.id,
                 role_label="agent",
-                username="agent",
-                password_encrypted=encrypt_credential("AgentPassword123!"),
+                username=settings.SUPPORTDESK_AGENT_EMAIL,
+                password_encrypted=encrypt_credential(settings.SUPPORTDESK_AGENT_PASSWORD),
             )
             db.add(agent_cred)
             print("[+] Seeded encrypted agent credential")
+        else:
+            agent_cred.username = settings.SUPPORTDESK_AGENT_EMAIL
+            agent_cred.password_encrypted = encrypt_credential(settings.SUPPORTDESK_AGENT_PASSWORD)
+            db.add(agent_cred)
+            print("[*] Updated encrypted agent credential")
 
         await db.commit()
 

@@ -267,7 +267,7 @@ async def test_part3_consecutive_login_failures_aborts_run_early_as_failed(
     """Part 3(b, c): Two consecutive login failures stops run early as FAILED."""
     from unittest.mock import patch
 
-    from app.agent.planner import PlanOutput, PlannedTestCase
+    from app.agent.planner import PlannedTestCase, PlanOutput
     from app.models.test_run import TestResult
 
     headers, user_id, proj_id = auth_headers

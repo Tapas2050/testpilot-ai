@@ -9,12 +9,21 @@ TEST_DB = "test_supportdesk.db"
 
 @pytest.fixture(autouse=True)
 def setup_test_db(monkeypatch, tmp_path):
+    import os
+
     db_file = tmp_path / "test_supportdesk.db"
     monkeypatch.setenv("SQLITE_PATH", str(db_file))
+    if not os.getenv("SUPPORTDESK_ADMIN_PASSWORD"):
+        monkeypatch.setenv("SUPPORTDESK_ADMIN_PASSWORD", "TestAdminPassword123!")
+    if not os.getenv("SUPPORTDESK_AGENT_PASSWORD"):
+        monkeypatch.setenv("SUPPORTDESK_AGENT_PASSWORD", "TestAgentPassword123!")
+
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     from app.database import init_db
+
     init_db(seed=True)
     yield
     get_settings.cache_clear()
@@ -24,6 +33,7 @@ def test_t7_3_defect_switch_default_off(monkeypatch):
     """T7.3: Defect switch is off by default if the variable is unset or empty."""
     monkeypatch.delenv("SUPPORTDESK_DEFECTS", raising=False)
     from app.config import get_settings
+
     get_settings.cache_clear()
     settings = get_settings()
     assert settings.defects_enabled is False
@@ -42,19 +52,24 @@ def test_t7_1_correct_build(monkeypatch):
     """
     monkeypatch.setenv("SUPPORTDESK_DEFECTS", "off")
     from app.config import get_settings
+
     get_settings.cache_clear()
+    settings = get_settings()
 
     from app.main import app
+
     client = TestClient(app)
 
     # 1. Invalid login fails
-    bad_login = client.post("/api/login", json={"email": "admin@supportdesk.local", "password": "Wrong"})
+    bad_login = client.post(
+        "/api/login", json={"email": "admin@supportdesk.local", "password": "Wrong"}
+    )
     assert bad_login.status_code == 401
 
     # 2. Admin login succeeds
     admin_login = client.post(
         "/api/login",
-        json={"email": "admin@supportdesk.local", "password": "AdminSecret123!"},
+        json={"email": settings.SUPPORTDESK_ADMIN_EMAIL, "password": settings.SUPPORTDESK_ADMIN_PASSWORD},
     )
     assert admin_login.status_code == 200
     admin_token = admin_login.json()["access_token"]
@@ -64,7 +79,7 @@ def test_t7_1_correct_build(monkeypatch):
     # 3. Agent login succeeds
     agent_login = client.post(
         "/api/login",
-        json={"email": "agent@supportdesk.local", "password": "AgentSecret123!"},
+        json={"email": settings.SUPPORTDESK_AGENT_EMAIL, "password": settings.SUPPORTDESK_AGENT_PASSWORD},
     )
     assert agent_login.status_code == 200
     agent_token = agent_login.json()["access_token"]
@@ -127,6 +142,7 @@ def test_t7_2_defective_build(monkeypatch):
     monkeypatch.setenv("SUPPORTDESK_DEFECTS", "on")
     from app.config import get_settings
     get_settings.cache_clear()
+    settings = get_settings()
 
     from app.main import app
     client = TestClient(app)
@@ -134,7 +150,7 @@ def test_t7_2_defective_build(monkeypatch):
     # Login as agent
     agent_login = client.post(
         "/api/login",
-        json={"email": "agent@supportdesk.local", "password": "AgentSecret123!"},
+        json={"email": settings.SUPPORTDESK_AGENT_EMAIL, "password": settings.SUPPORTDESK_AGENT_PASSWORD},
     )
     assert agent_login.status_code == 200
     agent_token = agent_login.json()["access_token"]

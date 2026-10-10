@@ -87,9 +87,31 @@ uv run python scripts/seed_demo.py
 ```
 This creates:
 - **Demo User**: `demo@testpilot.ai` / `DemoPassword123!`
-- **Demo Project**: SupportDesk (target URL: `http://localhost:8001`)
-- **Credentials**: Admin (`admin` / `adminpass`) and Support Agent (`agent` / `agentpass`)
-- **Requirements Knowledge**: 11 indexed chunks from `SUPPORTDESK_REQUIREMENTS.md` in pgvector
+- **Demo Project**: SupportDesk (target URL from `SUPPORTDESK_URL`)
+- **Credentials**: Encrypted Admin and Agent credentials loaded directly from root `.env`
+- **Requirements Knowledge**: Indexed chunks from `SUPPORTDESK_REQUIREMENTS.md` in pgvector
+
+### Reseeding SupportDesk & Synchronizing Target Credentials
+
+When updating credentials in `.env` or resetting the demo application to a clean state, follow this exact sequence:
+
+1. **Stop SupportDesk**: Stop any running process serving SupportDesk on port 8001.
+2. **Reseed SupportDesk Database**:
+   ```powershell
+   cd supportdesk
+   uv run python reseed.py
+   ```
+3. **Update Stored Demo Credentials**:
+   ```powershell
+   cd backend
+   uv run python scripts/seed_demo.py
+   ```
+4. **Start Services**: Restart SupportDesk (`cd supportdesk; uv run uvicorn app.main:app --port 8001`), the backend API, the worker, and frontend.
+5. **Verify Stored Credentials**:
+   ```powershell
+   cd backend
+   uv run python scripts/check_target_login.py
+   ```
 
 ### 3. Start SupportDesk Target Application (Port 8001)
 
