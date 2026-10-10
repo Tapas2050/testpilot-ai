@@ -33,8 +33,10 @@ export function TestRunPage() {
     error,
     cancelling,
     cancelRun,
-    isTerminal,
+    isTerminal: hookIsTerminal,
   } = useRunStatus(runId);
+
+  const isTerminal = hookIsTerminal || (run?.status ? ['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status) : false);
 
   const [expandedTestIds, setExpandedTestIds] = useState({});
   const [elapsedSeconds, setElapsedSeconds] = useState(0);

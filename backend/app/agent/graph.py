@@ -9,8 +9,8 @@ from typing import Any, Optional
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 
+import app.agent.executor as executor
 from app.agent.checkpointer import get_checkpointer
-from app.agent.executor import execute_single_test_case
 from app.agent.llm import get_live_call_count
 from app.agent.mcp_client import PlaywrightMCPClient, ToolTimeoutError
 from app.agent.state import AgentState
@@ -22,6 +22,7 @@ from app.services.run_service import (
     clear_live_progress_keys,
     is_cancel_flag_set,
     release_run_lock,
+    set_worker_heartbeat,
     update_live_progress,
     update_run_in_db,
 )
@@ -226,7 +227,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
 
                 try:
                     result = await asyncio.wait_for(
-                        execute_single_test_case(
+                        executor.execute_single_test_case(
                             test_case=tc,
                             target_url=target_url,
                             credentials=credentials,
@@ -708,8 +709,8 @@ async def _finalize_run(
                         session.add(blocked_res)
                         existing_results.append(blocked_res)
 
-                # Build and store partial report if run failed or cancelled
-                if not run.report or run.status in ("FAILED", "CANCELLED"):
+                # Build and store partial report if not already generated
+                if not run.report:
                     from app.agent.report import generate_run_report
 
                     tcs_data = [
@@ -733,6 +734,27 @@ async def _finalize_run(
                     status=run.status,
                     stage=run.status,
                     error=run.error_message,
+                )
+            elif exit_status:
+                if user_cancelled or exit_status == "CANCELLED":
+                    final_status = "CANCELLED"
+                    final_err = error_message or "Run cancelled by user"
+                else:
+                    final_status = exit_status
+                    final_err = error_message or "Worker was interrupted"
+                await update_run_in_db(
+                    run_id,
+                    status=final_status,
+                    error_message=final_err,
+                    completed_at=now,
+                    cancel_requested=(final_status == "CANCELLED"),
+                    db_url=db_url,
+                )
+                await cache_run_status(
+                    run_id,
+                    status=final_status,
+                    stage=final_status,
+                    error=final_err,
                 )
     except Exception as e:
         logger.error("[run_id=%s] Error updating DB in finalizer: %s", run_id, e)
@@ -781,6 +803,21 @@ async def execute_agent_run(
     exit_status = None
     err_msg = None
 
+    stop_heartbeat = asyncio.Event()
+
+    async def _heartbeat_loop() -> None:
+        while not stop_heartbeat.is_set():
+            try:
+                await set_worker_heartbeat(run_id, ttl=60)
+            except Exception as e:
+                logger.debug("[run_id=%s] Failed to write heartbeat: %s", run_id, e)
+            try:
+                await asyncio.wait_for(stop_heartbeat.wait(), timeout=15.0)
+            except asyncio.TimeoutError:
+                pass
+
+    heartbeat_task = asyncio.create_task(_heartbeat_loop())
+
     try:
         # Check if forced failure requested for testing T8.3
         if force_fail_at == "start":
@@ -820,6 +857,12 @@ async def execute_agent_run(
             pass
         exit_status = "CANCELLED" if is_user_cancel else "FAILED"
     finally:
+        stop_heartbeat.set()
+        try:
+            await heartbeat_task
+        except Exception:
+            pass
+
         await asyncio.shield(
             _finalize_run(
                 run_id=run_id,

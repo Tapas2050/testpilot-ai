@@ -3,16 +3,22 @@ Redis caching, and cancellation.
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
-from app.models.test_run import TestRun
+from app.models.test_run import TestCase, TestResult, TestRun
+
+logger = logging.getLogger(__name__)
+
+ACTIVE_STATUSES = {"QUEUED", "PLANNING", "EXECUTING", "ANALYZING", "REPORTING"}
 
 
 def get_lock_ttl_seconds() -> int:
@@ -49,6 +55,26 @@ async def is_cancel_flag_set(run_id: uuid.UUID) -> bool:
     redis = get_redis_client()
     val = await redis.get(f"run_cancel:{run_id}")
     return bool(val)
+
+
+async def set_worker_heartbeat(run_id: uuid.UUID, ttl: int = 60) -> None:
+    """Set or refresh worker heartbeat in Redis with a TTL (default 60s)."""
+    try:
+        redis = get_redis_client()
+        await redis.set(f"worker_heartbeat:{run_id}", "alive", ex=ttl)
+    except Exception as e:
+        logger.debug("[run_id=%s] Failed to set worker heartbeat: %s", run_id, e)
+
+
+async def check_worker_heartbeat(run_id: uuid.UUID) -> bool:
+    """Check if worker heartbeat key exists in Redis."""
+    try:
+        redis = get_redis_client()
+        val = await redis.get(f"worker_heartbeat:{run_id}")
+        return val is not None
+    except Exception as e:
+        logger.warning("[run_id=%s] Failed to check worker heartbeat: %s", run_id, e)
+        return False
 
 
 async def cache_run_status(
@@ -203,5 +229,115 @@ async def clear_live_progress_keys(run_id: uuid.UUID) -> None:
         )
     except Exception:
         pass
+
+
+async def check_and_fail_dead_run(run: TestRun, session: AsyncSession) -> bool:
+    """
+    Check if an active-status run has lost its worker heartbeat and is older than 90 seconds.
+    If dead, mark it FAILED with 'Worker stopped responding', release lock, clear keys,
+    and update run in DB and cache.
+    Returns True if the run was marked dead, False otherwise.
+    """
+    if run.status not in ACTIVE_STATUSES:
+        return False
+
+    now = datetime.now(timezone.utc)
+    ref_time = run.started_at or run.created_at
+    if ref_time.tzinfo is None:
+        ref_time = ref_time.replace(tzinfo=timezone.utc)
+    age_seconds = (now - ref_time).total_seconds()
+    if age_seconds <= 90:
+        return False
+
+    has_heartbeat = await check_worker_heartbeat(run.id)
+    if has_heartbeat:
+        return False
+
+    # Run is active, >90s old, and missing heartbeat -> dead worker!
+    logger.warning(
+        "[run_id=%s] Detected dead worker run (age=%.1fs, no heartbeat). Marking FAILED.",
+        run.id,
+        age_seconds,
+    )
+    run.status = "FAILED"
+    run.error_message = "Worker stopped responding"
+    run.completed_at = now
+
+    # Mark unfinished test cases as BLOCKED and ensure TestResult exists
+    try:
+        tc_stmt = (
+            select(TestCase)
+            .where(TestCase.run_id == run.id)
+            .order_by(TestCase.order_index)
+        )
+        tcs = (await session.execute(tc_stmt)).scalars().all()
+        for tc in tcs:
+            if tc.status not in ("PASSED", "FAILED", "BLOCKED"):
+                tc.status = "BLOCKED"
+                session.add(tc)
+
+        res_stmt = (
+            select(TestResult)
+            .join(TestCase, TestResult.test_case_id == TestCase.id)
+            .where(TestCase.run_id == run.id)
+        )
+        existing_results = (await session.execute(res_stmt)).scalars().all()
+        existing_tc_ids = {r.test_case_id for r in existing_results}
+        for tc in tcs:
+            if tc.id not in existing_tc_ids:
+                blocked_res = TestResult(
+                    test_case_id=tc.id,
+                    status="BLOCKED",
+                    error_message="Test did not finish before run terminated",
+                )
+                session.add(blocked_res)
+                existing_results.append(blocked_res)
+
+        if not run.report:
+            from app.agent.report import generate_run_report
+
+            tcs_data = [
+                {"id": str(tc.id), "status": tc.status, "title": tc.title}
+                for tc in tcs
+            ]
+            results_data = [
+                {"status": r.status, "test_case_id": str(r.test_case_id)}
+                for r in existing_results
+            ]
+            run.report = generate_run_report(
+                test_cases=tcs_data, results=results_data, failures=[]
+            )
+    except Exception as e:
+        logger.error("[run_id=%s] Error finalizing dead run test cases: %s", run.id, e)
+
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+
+    # Update cache, release run lock, clear progress keys
+    await cache_run_status(
+        run.id,
+        status="FAILED",
+        stage="FAILED",
+        error="Worker stopped responding",
+    )
+    await release_run_lock(run.project_id)
+    await clear_live_progress_keys(run.id)
+    return True
+
+
+async def sweep_dead_runs(session: AsyncSession) -> list[uuid.UUID]:
+    """Find all active runs older than 90 seconds without heartbeat and fail them."""
+    stmt = (
+        select(TestRun)
+        .options(selectinload(TestRun.test_cases))
+        .where(TestRun.status.in_(ACTIVE_STATUSES))
+    )
+    active_runs = (await session.execute(stmt)).scalars().all()
+    failed_run_ids = []
+    for run in active_runs:
+        if await check_and_fail_dead_run(run, session):
+            failed_run_ids.append(run.id)
+    return failed_run_ids
 
 

@@ -22,6 +22,16 @@ setup_structured_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan managing startup and clean shutdown of connections."""
+    try:
+        from app.core.database import async_session_factory
+        from app.services.run_service import sweep_dead_runs
+
+        async with async_session_factory() as session:
+            await sweep_dead_runs(session)
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("Startup dead runs sweep failed: %s", e)
     yield
     await close_redis()
     await engine.dispose()

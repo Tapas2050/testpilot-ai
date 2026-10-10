@@ -17,7 +17,9 @@ from app.models.project import Project
 from app.models.test_run import TestRun
 from app.models.user import User
 from app.services.run_service import (
+    ACTIVE_STATUSES,
     acquire_run_lock,
+    check_and_fail_dead_run,
     get_cached_run_status,
     get_live_progress,
     get_live_step_events,
@@ -82,9 +84,6 @@ class RunSummaryResponse(BaseModel):
     total_tests: int = 0
     passed_tests: int = 0
     failed_tests: int = 0
-
-
-ACTIVE_STATUSES = {"QUEUED", "PLANNING", "EXECUTING", "ANALYZING", "REPORTING"}
 
 
 @router.post(
@@ -175,6 +174,10 @@ async def get_test_run(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Test run not found",
         )
+
+    # Check for dead worker if run is in active status
+    if run.status in ACTIVE_STATUSES:
+        await check_and_fail_dead_run(run, db)
 
     # Check if there is an active stage / progress in Redis cache
     cached = await get_cached_run_status(run_id)
