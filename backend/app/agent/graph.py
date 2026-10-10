@@ -7,15 +7,17 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from langgraph.graph import END, START, StateGraph
+from sqlalchemy import select
 
 from app.agent.checkpointer import get_checkpointer
 from app.agent.llm import get_live_call_count
 from app.agent.state import AgentState
 from app.core.config import get_settings
 from app.core.database import get_async_session_factory
-from app.models.test_run import TestCase
+from app.models.test_run import TestCase, TestResult, TestRun
 from app.services.run_service import (
     cache_run_status,
+    clear_live_progress_keys,
     is_cancel_flag_set,
     release_run_lock,
     update_live_progress,
@@ -200,6 +202,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
         import os
         is_mock_mcp = state.get("is_mock_mcp", False) or bool(os.getenv("PYTEST_CURRENT_TEST"))
         mcp_client = PlaywrightMCPClient(is_mock=is_mock_mcp)
+        _active_mcp_clients[run_id] = mcp_client
         await mcp_client.start()
 
         try:
@@ -567,6 +570,132 @@ def build_agent_graph(checkpointer=None):
     return workflow.compile(checkpointer=checkpointer)
 
 
+_active_mcp_clients: dict[uuid.UUID, Any] = {}
+
+
+async def _finalize_run(
+    run_id: uuid.UUID,
+    project_id: uuid.UUID,
+    db_url: Optional[str] = None,
+    exit_status: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    """Guaranteed clean finalization for test runs on ANY exit.
+
+    Protected against cancellation via asyncio.shield.
+    """
+    logger.info("[run_id=%s] Running clean finalizer (exit_status=%s)", run_id, exit_status)
+
+    # 1. Shut down any active MCP client / Chromium child process
+    client = _active_mcp_clients.pop(run_id, None)
+    if client:
+        try:
+            await client.close()
+        except Exception as e:
+            logger.warning("[run_id=%s] Failed to close MCP client in finalizer: %s", run_id, e)
+
+    # 2. Check if user requested cancellation
+    user_cancelled = False
+    try:
+        user_cancelled = await is_cancel_flag_set(run_id)
+    except Exception:
+        pass
+
+    session_factory = get_async_session_factory(db_url)
+    now = datetime.now(timezone.utc)
+
+    # 3. Update database state
+    try:
+        async with session_factory() as session:
+            stmt = select(TestRun).where(TestRun.id == run_id)
+            run = (await session.execute(stmt)).scalar_one_or_none()
+            if run:
+                is_terminal = run.status in ("COMPLETED", "FAILED", "CANCELLED")
+
+                if not is_terminal or exit_status:
+                    if user_cancelled or exit_status == "CANCELLED":
+                        final_status = "CANCELLED"
+                        final_err = error_message or "Run cancelled by user"
+                    else:
+                        final_status = "FAILED"
+                        final_err = error_message or "Worker was interrupted"
+
+                    run.status = final_status
+                    run.error_message = final_err
+                    run.completed_at = now
+                    run.cancel_requested = (final_status == "CANCELLED")
+
+                # Mark test cases that never finished as BLOCKED
+                tc_stmt = (
+                    select(TestCase).where(TestCase.run_id == run_id).order_by(TestCase.order_index)
+                )
+                tcs = (await session.execute(tc_stmt)).scalars().all()
+                for tc in tcs:
+                    if tc.status not in ("PASSED", "FAILED", "BLOCKED"):
+                        tc.status = "BLOCKED"
+                        session.add(tc)
+
+                # Ensure a TestResult exists for every test case
+                res_stmt = (
+                    select(TestResult)
+                    .join(TestCase, TestResult.test_case_id == TestCase.id)
+                    .where(TestCase.run_id == run_id)
+                )
+                existing_results = (await session.execute(res_stmt)).scalars().all()
+                existing_tc_ids = {r.test_case_id for r in existing_results}
+
+                for tc in tcs:
+                    if tc.id not in existing_tc_ids:
+                        blocked_res = TestResult(
+                            test_case_id=tc.id,
+                            status="BLOCKED",
+                            error_message="Test did not finish before run terminated",
+                        )
+                        session.add(blocked_res)
+                        existing_results.append(blocked_res)
+
+                # Build and store partial report if run failed or cancelled
+                if not run.report or run.status in ("FAILED", "CANCELLED"):
+                    from app.agent.report import generate_run_report
+
+                    tcs_data = [
+                        {"id": str(tc.id), "status": tc.status, "title": tc.title}
+                        for tc in tcs
+                    ]
+                    results_data = [
+                        {"status": r.status, "test_case_id": str(r.test_case_id)}
+                        for r in existing_results
+                    ]
+                    run.report = generate_run_report(
+                        test_cases=tcs_data, results=results_data, failures=[]
+                    )
+
+                session.add(run)
+                await session.commit()
+
+                # Update Redis status cache
+                await cache_run_status(
+                    run_id,
+                    status=run.status,
+                    stage=run.status,
+                    error=run.error_message,
+                )
+    except Exception as e:
+        logger.error("[run_id=%s] Error updating DB in finalizer: %s", run_id, e)
+
+    # 4. Release Redis run lock
+    try:
+        await release_run_lock(project_id)
+    except Exception as e:
+        logger.warning("[run_id=%s] Failed to release run lock in finalizer: %s", run_id, e)
+
+    # 5. Clear Redis live progress keys
+    try:
+        await clear_live_progress_keys(run_id)
+    except Exception as e:
+        logger.warning("[run_id=%s] Failed to clear live progress keys in finalizer: %s", run_id, e)
+
+
 async def execute_agent_run(
     run_id: uuid.UUID,
     project_id: uuid.UUID,
@@ -595,6 +724,9 @@ async def execute_agent_run(
 
     logger.info("[run_id=%s] Agent run started for project %s", run_id, project_id)
     settings = get_settings()
+    exit_status = None
+    err_msg = None
+
     try:
         # Check if forced failure requested for testing T8.3
         if force_fail_at == "start":
@@ -608,29 +740,41 @@ async def execute_agent_run(
         await asyncio.wait_for(_stream_graph(), timeout=float(settings.RUN_TIMEOUT_SECONDS))
 
     except asyncio.TimeoutError:
+        exit_status = "FAILED"
         err_msg = f"Run exceeded the time limit of {settings.RUN_TIMEOUT_SECONDS} seconds"
         logger.error("[run_id=%s] %s", run_id, err_msg)
-        status = "FAILED"
-        now = datetime.now(timezone.utc)
-        await update_run_in_db(
-            run_id, status=status, completed_at=now, error_message=err_msg, db_url=db_url
-        )
-        await cache_run_status(run_id, status=status, stage=status, error=err_msg)
-        await update_live_progress(run_id, stage=status)
-        await release_run_lock(project_id)
+    except asyncio.CancelledError:
+        logger.warning("[run_id=%s] Execution cancelled", run_id)
+        is_user_cancel = False
+        try:
+            is_user_cancel = await is_cancel_flag_set(run_id)
+        except Exception:
+            pass
+        if is_user_cancel:
+            exit_status = "CANCELLED"
+            err_msg = "Run cancelled by user"
+        else:
+            exit_status = "FAILED"
+            err_msg = "Worker was interrupted"
     except Exception as exc:
         err_msg = str(exc)
         logger.error("[run_id=%s] Agent run failed with exception: %s", run_id, err_msg)
-        status = "FAILED"
-        now = datetime.now(timezone.utc)
-        await update_run_in_db(
-            run_id, status=status, completed_at=now, error_message=err_msg, db_url=db_url
-        )
-        await cache_run_status(run_id, status=status, stage=status, error=err_msg)
-        await update_live_progress(run_id, stage=status)
-        await release_run_lock(project_id)
-        # We catch and do not re-raise so worker task completes cleanly and API stays up
+        is_user_cancel = False
+        try:
+            is_user_cancel = await is_cancel_flag_set(run_id)
+        except Exception:
+            pass
+        exit_status = "CANCELLED" if is_user_cancel else "FAILED"
     finally:
+        await asyncio.shield(
+            _finalize_run(
+                run_id=run_id,
+                project_id=project_id,
+                db_url=db_url,
+                exit_status=exit_status,
+                error_message=err_msg,
+            )
+        )
         logger.info(
             "[run_id=%s] Agent run finished. Total live LLM calls: %d",
             run_id,

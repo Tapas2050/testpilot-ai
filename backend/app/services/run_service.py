@@ -191,3 +191,17 @@ async def get_live_progress(run_id: uuid.UUID) -> Optional[dict[str, Any]]:
         return None
     return None
 
+
+async def clear_live_progress_keys(run_id: uuid.UUID) -> None:
+    """Clear transient live progress, step events, and worker heartbeat keys from Redis."""
+    try:
+        redis = get_redis_client()
+        await redis.delete(
+            f"run_progress:{run_id}",
+            f"run_events:{run_id}",
+            f"worker_heartbeat:{run_id}",
+        )
+    except Exception:
+        pass
+
+
