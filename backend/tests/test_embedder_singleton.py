@@ -8,6 +8,14 @@ from app.services.embedder import LocalEmbedder, _process_model_cache, get_embed
 from app.worker.tasks import WorkerSettings, worker_startup
 
 
+@pytest.fixture(autouse=True)
+def clean_embedder_cache():
+    """Ensure _process_model_cache is always cleaned before and after tests."""
+    _process_model_cache.clear()
+    yield
+    _process_model_cache.clear()
+
+
 def test_embedding_model_process_singleton():
     """Verify that get_embedding_model caches and reuses the exact same model instance."""
     mock_st_instance = MagicMock()
@@ -15,9 +23,6 @@ def test_embedding_model_process_singleton():
     with patch(
         "sentence_transformers.SentenceTransformer", return_value=mock_st_instance
     ) as mock_st_cls:
-        # Clear cache for isolated test
-        _process_model_cache.clear()
-
         model1 = get_embedding_model("test-model")
         model2 = get_embedding_model("test-model")
 
@@ -41,8 +46,6 @@ async def test_worker_startup_preloads_singleton():
     with patch(
         "sentence_transformers.SentenceTransformer", return_value=mock_st_instance
     ) as mock_st_cls:
-        _process_model_cache.clear()
-
         ctx = {}
         await worker_startup(ctx)
 
