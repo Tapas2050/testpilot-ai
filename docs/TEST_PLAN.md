@@ -105,6 +105,15 @@ Phase 13 (Hardening)
 - T13.5 Repeat the full eval run three times and record consistency
 - T13.6 Fresh-clone setup following README only
 
+Phase 14 (Run Experience & Hardening Improvements)
+- T14.1 Status Styles & Neutral Fallbacks: Shared module covers all 13 backend/test statuses with neutral fallback; ErrorBoundary renders recovery button on error; 404 route catches unknown paths.
+- T14.2 Frontend Status Rendering: Frontend tests verify TestRunPage and ReportPage render cleanly across every status without throwing.
+- T14.3 Live Progress Screen & Redis Events: 6-stage stepper renders animated active stage, finished ticks, failed marks; activity feed renders sanitized events in order; progress bar and elapsed timer update.
+- T14.4 Auth Fail-Fast: Scripted role login failure marks test BLOCKED with classification AUTHENTICATION_FAILURE and 0 LLM calls; 2 consecutive auth failures aborts run as FAILED naming role; all BLOCKED tests end run as FAILED.
+- T14.5 Executor Loop Detection: 3 identical consecutive actions (action, selector, value) or 4 consecutive unchanged visible page text states terminate test as FAILED with 0 further LLM calls.
+- T14.6 Target App Credentials Synchronization: SupportDesk and seeder read from root .env without hardcoded passwords; reseed script recreates SQLite db; check_target_login verifies stored credentials in memory without leaking secrets.
+- T14.7 Config Defaults & Lock Expiry Alignment: Primary model defaults to gemini-3.5-flash-lite; RPM=12; RUN_TIMEOUT_SECONDS=1800; Redis lock TTL strictly exceeds run timeout; worker logs lifecycle events and total live LLM calls.
+
 ## 4. Agent Quality Metrics (record in MEMORY.md after each eval run)
 - Planned tests traceable to a requirement: target 100 percent
 - Planted defects found on the defective build: target 3 of 3

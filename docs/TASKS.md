@@ -123,5 +123,12 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 13.7 Demo rehearsal and backup recording
 - [x] 13.8 Fresh-clone setup test
 
+## Run Experience Improvements & Hardening
+- [x] Fix 1: White screen on run page resolved with shared `statusStyles.js`, neutral fallbacks, global ErrorBoundary, 404 catch-all route, and Vitest status tests
+- [x] Fix 2: Live progress screen with 6-stage animated stepper, progress bar, live elapsed timer, live activity feed, Redis transient events list, and friendly empty states
+- [x] Fix 3: Authentication fail-fast (BLOCKED on auth failure, 2-failure early run abort, all-BLOCKED run status FAILED) and executor loop detection (3 repeating actions / 4 unchanged page text states)
+- [x] Fix 4: Synchronized SupportDesk credentials from root `.env` without hardcoded fallbacks, one-command `supportdesk/reseed.py`, credential verification `backend/scripts/check_target_login.py`
+- [x] Fix 5: Default primary model `gemini-3.5-flash-lite`, rate limit 12 RPM, `RUN_TIMEOUT_SECONDS=1800`, Redis duplicate lock TTL aligned, worker INFO logs with `[run_id=...]`, live LLM calls tracking at run completion, and temperature warning suppression
+
 ## Blocked / Deferred
-(none yet)
+- Document upload and embedding loading pipeline optimization (deferred to a separate pass per user instructions)

@@ -135,3 +135,25 @@ Context: During a test run, the frontend needs to display real-time stage progre
 Decision: Store live step events and execution progress transiently in Redis (`run_events:{run_id}` and `run_progress:{run_id}`). Events are pushed via `rpush`, capped with `ltrim` to the last 100 events, and set with an automatic 24-hour expiration (`expire 86400`). Credentials are redacted in memory prior to pushing. Polling `GET /runs/{id}` returns the aggregated live progress and recent events from Redis during active execution, while persistent final test results and screenshots continue to be committed to PostgreSQL upon step/test conclusion.
 Consequences: Zero database migration required; near-zero latency for live activity polling; automatic cleanup via Redis TTL; complete isolation from historical report storage.
 
+## D-024 Fail-Fast on Target Authentication Failures and Executor Loop Detection
+Status: Accepted
+Context: If target credentials are wrong or missing, previous runs attempted to execute all planned tests, repeatedly submitting login credentials and hanging in loops until timeout.
+Decision:
+- If a scripted role login fails, immediately mark the test case as BLOCKED with classification AUTHENTICATION_FAILURE without making any LLM calls.
+- If two consecutive test cases encounter authentication failure, stop the entire run early as FAILED with a clear notification naming the role and advising the user to verify project credentials in Project Settings. Mark remaining tests as BLOCKED, release the Redis lock, and store the generated report.
+- If all executed tests are BLOCKED due to authentication, mark the final run status as FAILED rather than COMPLETED.
+- In the executor, detect stuck loops: if the same action, selector, and value repeat 3 times in a row, or the visible page text remains unchanged across 4 consecutive steps, immediately terminate the test as FAILED with 0 further LLM calls.
+Consequences: Massive token and time savings; eliminates runaway LLM calls and execution loops; gives instantaneous feedback to the user on incorrect credential configuration.
+
+## D-025 Synchronized Target App Credentials, Lock Expiry Alignment, and Logging
+Status: Accepted
+Context: Demo target credentials must strictly match the target app without hardcoded secrets, and the worker process needs complete lifecycle logging and aligned timeouts.
+Decision:
+- Both SupportDesk CRM and TestPilot's demo seeder (`backend/scripts/seed_demo.py`) load credentials and URLs directly from the root `.env` (`SUPPORTDESK_ADMIN_EMAIL`, `SUPPORTDESK_ADMIN_PASSWORD`, `SUPPORTDESK_AGENT_EMAIL`, `SUPPORTDESK_AGENT_PASSWORD`, `SUPPORTDESK_URL`). If passwords are empty, both fail loudly naming the missing variable.
+- SupportDesk database reset is provided as a single command `supportdesk/reseed.py`.
+- Target login verification script `backend/scripts/check_target_login.py` decrypts in memory and prints ONLY role names and OK/FAIL without leaking any credentials or email addresses.
+- Primary model code default is set to `gemini-3.5-flash-lite`, rate limit default to 12 RPM, and `RUN_TIMEOUT_SECONDS` to 1800.
+- Redis run lock TTL dynamically scales to `max(RUN_TIMEOUT_SECONDS + 300, 2100)` to ensure locks never prematurely expire during long runs.
+- Worker emits structured INFO logs with `[run_id=...]` for every stage change, test start/end, and sanitized executor step, plus total live LLM calls at run completion.
+Consequences: Zero credential discrepancies; complete visibility into agent runs; safe lock lifecycles.
+
