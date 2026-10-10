@@ -21,6 +21,11 @@ async def run_agent_job(
     """Worker task executed by arq."""
     run_id = uuid.UUID(run_id_str)
     project_id = uuid.UUID(project_id_str)
+    # Fall back to settings.DATABASE_URL if password was masked with '***'
+    if db_url and ":***@" in db_url:
+        settings = get_settings()
+        db_url = str(settings.DATABASE_URL)
+
     await execute_agent_run(
         run_id=run_id,
         project_id=project_id,

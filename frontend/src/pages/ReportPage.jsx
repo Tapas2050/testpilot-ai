@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { ScreenshotViewer } from '../components/ScreenshotViewer';
 import { Banner } from '../components/Banner';
+import { getSeverityStyle } from '../utils/statusStyles';
 
 export function ReportPage() {
   const { id: runId } = useParams();
@@ -75,13 +76,6 @@ export function ReportPage() {
     const res = results.find((r) => r.test_case_id === tc.id);
     return res && res.status === 'PASSED';
   });
-
-  const severityColors = {
-    CRITICAL: { bg: '#FEE2E2', text: '#991B1B', border: '#F87171' },
-    HIGH: { bg: '#FFEDD5', text: '#9A3412', border: '#FB923C' },
-    MEDIUM: { bg: '#FEF3C7', text: '#92400E', border: '#FCD34D' },
-    LOW: { bg: '#F1F5F9', text: '#475569', border: '#CBD5E1' },
-  };
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#FFFFFF', color: '#0F172A', paddingBottom: '80px' }}>
@@ -202,7 +196,7 @@ export function ReportPage() {
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {Object.entries(severity_breakdown).map(([sev, count]) => {
-                  const style = severityColors[sev] || severityColors.LOW;
+                  const style = getSeverityStyle(sev);
                   return (
                     <div
                       key={sev}
@@ -271,7 +265,7 @@ export function ReportPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {failures.map((f, idx) => {
-                const sevStyle = severityColors[f.severity] || severityColors.LOW;
+                const sevStyle = getSeverityStyle(f.severity);
 
                 // Find matching test case and result for title and evidence screenshots
                 const matchedResult = results.find((r) => r.id === f.test_result_id);

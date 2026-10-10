@@ -322,4 +322,113 @@ describe('Phase 12: Runs and Reports Frontend Tests', () => {
       expect(screen.getByText('Run Detail Screen')).toBeDefined();
     });
   });
+
+  it('renders TestRunPage cleanly for every status including unknown statuses without throwing', async () => {
+    const statusesToTest = [
+      'QUEUED',
+      'PLANNING',
+      'EXECUTING',
+      'ANALYZING',
+      'REPORTING',
+      'COMPLETED',
+      'FAILED',
+      'CANCELLED',
+      'UNKNOWN_STATUS_XYZ',
+    ];
+
+    for (const status of statusesToTest) {
+      api.runs.get.mockResolvedValueOnce({
+        id: `run-${status}`,
+        project_id: 'proj-1',
+        status,
+        agent_stage: status,
+        test_cases: [
+          { id: 'tc-1', test_key: 'TC-01', title: 'Login test', requirement_id: 'REQ-1' },
+        ],
+        results: [
+          { id: 'res-1', test_case_id: 'tc-1', status: 'RUNNING', steps: [] },
+        ],
+      });
+
+      const { unmount } = render(
+        <MemoryRouter initialEntries={[`/runs/run-${status}`]}>
+          <Routes>
+            <Route path="/runs/:id" element={<TestRunPage />} />
+          </Routes>
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByText(status).length).toBeGreaterThan(0);
+      });
+
+      unmount();
+    }
+  });
+
+  it('renders TestRunPage when run is QUEUED with zero test cases and no report', async () => {
+    api.runs.get.mockResolvedValueOnce({
+      id: 'run-queued-empty',
+      project_id: 'proj-1',
+      status: 'QUEUED',
+      agent_stage: 'INITIALIZING',
+      test_cases: [],
+      results: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/runs/run-queued-empty']}>
+        <Routes>
+          <Route path="/runs/:id" element={<TestRunPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('QUEUED')).toBeDefined();
+      expect(screen.getByText('Planning tests from your requirements...')).toBeDefined();
+    });
+  });
+
+  it('renders ReportPage with unknown severity without throwing', async () => {
+    api.runs.report.mockResolvedValueOnce({
+      id: 'rep-unknown-sev',
+      run_id: 'run-rep-unk',
+      total_tests: 1,
+      passed_tests: 0,
+      failed_tests: 1,
+      pass_percentage: 0,
+      summary: 'Test failure with unknown severity',
+      severity_breakdown: { UNKNOWN_SEV: 1 },
+      classification_breakdown: { UNKNOWN_CLS: 1 },
+      failures: [
+        {
+          id: 'fail-1',
+          test_result_id: 'res-1',
+          severity: 'UNKNOWN_SEV',
+          classification: 'UNKNOWN_CLS',
+          expected: 'Page loads',
+          observed: 'Error 500',
+          explanation: 'Unexpected backend error',
+          suggested_action: 'Fix server',
+        },
+      ],
+      test_cases: [{ id: 'tc-1', test_key: 'TC-1', title: 'Failing test' }],
+      results: [{ id: 'res-1', test_case_id: 'tc-1', status: 'FAILED' }],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/runs/run-rep-unk/report']}>
+        <Routes>
+          <Route path="/runs/:id/report" element={<ReportPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Test failure with unknown severity')).toBeDefined();
+      expect(screen.getByText('UNKNOWN_SEV: 1')).toBeDefined();
+      expect(screen.getByText('UNKNOWN_SEV')).toBeDefined();
+    });
+  });
 });

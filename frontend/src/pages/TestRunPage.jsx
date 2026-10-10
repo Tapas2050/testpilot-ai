@@ -4,6 +4,7 @@ import { useRunStatus } from '../hooks/useRunStatus';
 import { StageStepper } from '../components/StageStepper';
 import { Banner } from '../components/Banner';
 import { ScreenshotViewer } from '../components/ScreenshotViewer';
+import { getStatusStyle } from '../utils/statusStyles';
 
 export function TestRunPage() {
   const { id: runId } = useParams();
@@ -58,13 +59,7 @@ export function TestRunPage() {
   const passCount = results.filter((r) => r.status === 'PASSED').length;
   const failCount = results.filter((r) => r.status === 'FAILED').length;
 
-  const statusColors = {
-    QUEUED: { bg: '#FEF3C7', text: '#92400E' },
-    RUNNING: { bg: '#DBEAFE', text: '#1E40AF' },
-    COMPLETED: { bg: '#DCFCE7', text: '#166534' },
-    FAILED: { bg: '#FEE2E2', text: '#991B1B' },
-    CANCELLED: { bg: '#F1F5F9', text: '#475569' },
-  }[run?.status || 'QUEUED'];
+  const statusStyle = getStatusStyle(run?.status);
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#FFFFFF', color: '#0F172A', paddingBottom: '60px' }}>
@@ -119,11 +114,12 @@ export function TestRunPage() {
                   borderRadius: '12px',
                   fontSize: '12px',
                   fontWeight: 600,
-                  backgroundColor: statusColors.bg,
-                  color: statusColors.text,
+                  backgroundColor: statusStyle.bg,
+                  color: statusStyle.text,
+                  border: `1px solid ${statusStyle.border}`,
                 }}
               >
-                {run?.status}
+                {run?.status || 'QUEUED'}
               </span>
             </div>
             <p style={{ margin: '6px 0 0', color: '#64748B', fontSize: '14px' }}>
@@ -256,31 +252,21 @@ export function TestRunPage() {
                 const res = resultsMap[tc.id];
                 const isExpanded = !!expandedTestIds[tc.id];
 
-                const resultBadge = res ? (
+                const testStatusStyle = res ? getStatusStyle(res.status) : getStatusStyle('PENDING');
+                const resultBadge = (
                   <span
                     style={{
                       padding: '3px 8px',
                       borderRadius: '4px',
                       fontSize: '11px',
                       fontWeight: 600,
-                      backgroundColor:
-                        res.status === 'PASSED'
-                          ? '#DCFCE7'
-                          : res.status === 'FAILED'
-                          ? '#FEE2E2'
-                          : '#FEF3C7',
-                      color:
-                        res.status === 'PASSED'
-                          ? '#166534'
-                          : res.status === 'FAILED'
-                          ? '#991B1B'
-                          : '#92400E',
+                      backgroundColor: testStatusStyle.bg,
+                      color: testStatusStyle.text,
+                      border: `1px solid ${testStatusStyle.border}`,
                     }}
                   >
-                    {res.status}
+                    {res ? res.status : 'Pending'}
                   </span>
-                ) : (
-                  <span style={{ fontSize: '11px', color: '#94A3B8' }}>Pending</span>
                 );
 
                 return (

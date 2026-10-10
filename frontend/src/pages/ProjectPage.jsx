@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { Navbar } from '../components/Navbar';
 import { ProjectDialog } from '../components/ProjectDialog';
 import { CredentialDialog } from '../components/CredentialDialog';
+import { getStatusStyle } from '../utils/statusStyles';
 
 export function ProjectPage() {
   const { id } = useParams();
@@ -376,13 +377,7 @@ export function ProjectPage() {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {runs.map((r) => {
-                    const statusClass = {
-                      COMPLETED: 'badge-pass',
-                      FAILED: 'badge-fail',
-                      RUNNING: 'badge-info',
-                      CANCELLED: 'badge-secondary',
-                      QUEUED: 'badge-warning',
-                    }[r.status] || 'badge-secondary';
+                    const statusStyle = getStatusStyle(r.status);
 
                     return (
                       <div
@@ -406,7 +401,7 @@ export function ProjectPage() {
                             >
                               Run #{r.id.slice(0, 8)}
                             </Link>
-                            <span className={`badge ${statusClass}`}>{r.status}</span>
+                            <span className={`badge ${statusStyle.badgeClass}`}>{r.status}</span>
                             {r.report && (
                               <span style={{ fontSize: '12px', fontWeight: 600, color: '#16A34A' }}>
                                 {r.report.pass_percentage ?? r.report.pass_rate}% pass
