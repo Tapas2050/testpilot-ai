@@ -10,11 +10,13 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 
 from app.agent.checkpointer import get_checkpointer
+from app.agent.executor import execute_single_test_case
 from app.agent.llm import get_live_call_count
+from app.agent.mcp_client import PlaywrightMCPClient, ToolTimeoutError
 from app.agent.state import AgentState
 from app.core.config import get_settings
 from app.core.database import get_async_session_factory
-from app.models.test_run import TestCase, TestResult, TestRun
+from app.models.test_run import Failure, TestCase, TestResult, TestRun
 from app.services.run_service import (
     cache_run_status,
     clear_live_progress_keys,
@@ -150,15 +152,9 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
 
     from pathlib import Path
 
-    from sqlalchemy import select
-
-    from app.agent.executor import execute_single_test_case
-    from app.agent.mcp_client import PlaywrightMCPClient
-    from app.core.config import get_settings
     from app.core.security import decrypt_credential
     from app.models.credential import ProjectCredential
     from app.models.project import Project
-    from app.models.test_run import Failure, TestResult
 
     settings = get_settings()
     storage_dir = Path(settings.STORAGE_DIR)
@@ -228,14 +224,36 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                     completed_tests=len(results),
                 )
 
-                result = await execute_single_test_case(
-                    test_case=tc,
-                    target_url=target_url,
-                    credentials=credentials,
-                    mcp_client=mcp_client,
-                    run_id=run_id,
-                    storage_dir=storage_dir,
-                )
+                try:
+                    result = await asyncio.wait_for(
+                        execute_single_test_case(
+                            test_case=tc,
+                            target_url=target_url,
+                            credentials=credentials,
+                            mcp_client=mcp_client,
+                            run_id=run_id,
+                            storage_dir=storage_dir,
+                        ),
+                        timeout=float(settings.TEST_TIMEOUT_SECONDS),
+                    )
+                except (ToolTimeoutError, asyncio.TimeoutError) as exc:
+                    logger.error(
+                        "[run_id=%s] Test '%s' timed out (TEST_TIMEOUT_SECONDS=%ds): %s",
+                        run_id,
+                        tc.title,
+                        settings.TEST_TIMEOUT_SECONDS,
+                        exc,
+                    )
+                    await mcp_client.restart()
+                    timeout_s = settings.TEST_TIMEOUT_SECONDS
+                    result = TestResult(
+                        test_case_id=tc.id,
+                        status="FAILED",
+                        error_message=(
+                            f"Environment failure: Test timed out after {timeout_s}s ({exc})"
+                        ),
+                    )
+
                 tc.status = result.status
                 session.add(tc)
                 session.add(result)
@@ -247,6 +265,42 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                     tc.id,
                     result.status,
                 )
+
+                is_env_failure = (
+                    result.status == "FAILED"
+                    and (
+                        "Environment failure" in (result.error_message or "")
+                        or "timed out" in (result.error_message or "").lower()
+                    )
+                )
+                if is_env_failure:
+                    env_msg = result.error_message or "Tool timeout"
+                    env_failure_entry = {
+                        "test_case_id": str(tc.id),
+                        "title": tc.title,
+                        "source_requirement": tc.source_requirement,
+                        "classification": "ENVIRONMENT_FAILURE",
+                        "severity": "HIGH",
+                        "confidence": 1.0,
+                        "expected": "Browser tool execution succeeds within allocated timeout",
+                        "observed": env_msg,
+                        "explanation": (
+                            f"Browser tool timed out and MCP server was restarted: {env_msg}"
+                        ),
+                        "suggested_action": "Check target app responsiveness and resources.",
+                    }
+                    auth_failures.append(env_failure_entry)
+                    db_failure = Failure(
+                        test_case_id=tc.id,
+                        classification="ENVIRONMENT_FAILURE",
+                        severity="HIGH",
+                        confidence=1.0,
+                        expected=env_failure_entry["expected"],
+                        observed=env_failure_entry["observed"],
+                        explanation=env_failure_entry["explanation"],
+                        suggested_action=env_failure_entry["suggested_action"],
+                    )
+                    session.add(db_failure)
 
                 is_auth_failure = (
                     result.status == "BLOCKED"

@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.agent.llm import enforce_rate_limit, get_llm
-from app.agent.mcp_client import PlaywrightMCPClient
+from app.agent.mcp_client import PlaywrightMCPClient, ToolTimeoutError
 from app.core.config import get_settings
 from app.models.test_run import TestCase, TestResult
 from app.services.run_service import append_live_step_event, update_live_progress
@@ -417,6 +417,10 @@ Decide the next browser action to execute the test scenario, or finish if the re
                 error_message = f"Step budget of {max_steps} steps exceeded without conclusion"
                 status = "FAILED"
 
+    except ToolTimeoutError as exc:
+        logger.error("[run_id=%s] Tool timeout in test '%s': %s", run_id, test_case.title, exc)
+        error_message = f"Environment failure: {exc}"
+        status = "FAILED"
     except Exception as exc:
         logger.exception("Error executing test case")
         error_message = str(exc)
