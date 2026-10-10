@@ -9,6 +9,7 @@ import { TestRunPage } from '../pages/TestRunPage';
 import { ReportPage } from '../pages/ReportPage';
 import { ProjectPage } from '../pages/ProjectPage';
 import { api } from '../api/client';
+import { getStatusStyle, STATUS_STYLES, DEFAULT_STATUS_STYLE } from '../utils/statusStyles';
 
 vi.mock('../api/client', () => ({
   api: {
@@ -430,5 +431,105 @@ describe('Phase 12: Runs and Reports Frontend Tests', () => {
       expect(screen.getByText('UNKNOWN_SEV: 1')).toBeDefined();
       expect(screen.getByText('UNKNOWN_SEV')).toBeDefined();
     });
+  });
+
+  it('Part 5: renders honest failed run state with real stage, hint, start new run button, and unexecuted tests', async () => {
+    api.runs.create.mockResolvedValueOnce({ id: 'run-new-222', project_id: 'proj-1' });
+
+    api.runs.get.mockResolvedValueOnce({
+      id: 'run-failed-honest',
+      project_id: 'proj-1',
+      status: 'FAILED',
+      failed_stage: 'EXECUTING',
+      current_stage: 'EXECUTING',
+      error_message: 'Run failed in stage EXECUTING (TC-01): Playwright MCP connection closed unexpectedly',
+      started_at: new Date(Date.now() - 30000).toISOString(),
+      completed_at: new Date().toISOString(),
+      test_cases: [
+        { id: 'tc-1', test_key: 'TC-01', title: 'Login test', status: 'BLOCKED' },
+        { id: 'tc-2', test_key: 'TC-02', title: 'Create ticket test', status: 'BLOCKED' },
+      ],
+      results: [
+        {
+          id: 'res-1',
+          test_case_id: 'tc-1',
+          status: 'BLOCKED',
+          error_message: 'Not executed: run stopped (Playwright MCP connection closed unexpectedly)',
+        },
+        {
+          id: 'res-2',
+          test_case_id: 'tc-2',
+          status: 'BLOCKED',
+          error_message: 'Not executed: run stopped (Playwright MCP connection closed unexpectedly)',
+        },
+      ],
+      total_tests: 2,
+      completed_tests: 0,
+      passed_tests: 0,
+      failed_tests: 0,
+      blocked_tests: 0,
+      not_run_tests: 2,
+    });
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/runs/run-failed-honest']}>
+        <Routes>
+          <Route path="/runs/:id" element={<TestRunPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      // Banner shows real stage
+      expect(screen.getByText(/Failed in Stage: EXECUTING/)).toBeDefined();
+      // Banner shows real sanitized error message
+      expect(screen.getByText(/Playwright MCP connection closed unexpectedly/)).toBeDefined();
+      // Banner shows plain-English hint
+      expect(screen.getByText(/Verify Node.js and Playwright MCP server dependencies/)).toBeDefined();
+      // Banner shows "Start a new run" button
+      const startBtn = screen.getByText('Start a new run');
+      expect(startBtn).toBeDefined();
+
+      // Summary counts: Completed: 0, Not Run: 2
+      expect(screen.getAllByText('Completed').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Not Run').length).toBeGreaterThan(0);
+
+      // Test rows show "Not Run" badges
+      const notRunBadges = screen.getAllByText('Not Run');
+      expect(notRunBadges.length).toBeGreaterThan(0);
+    });
+
+    // Expand first test case to verify reason
+    const row = screen.getByText('Login test');
+    fireEvent.click(row);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Not executed: run stopped/).length).toBeGreaterThan(0);
+    });
+
+    // Click "Start a new run" button
+    const startNewBtn = screen.getByText('Start a new run');
+    fireEvent.click(startNewBtn);
+
+    await waitFor(() => {
+      expect(api.runs.create).toHaveBeenCalledWith('proj-1');
+    });
+
+    unmount();
+  });
+
+  it('Part 5: statusStyles handles PREFLIGHT, NOT_RUN, and neutral fallback', () => {
+    expect(STATUS_STYLES.PREFLIGHT).toBeDefined();
+    expect(STATUS_STYLES.NOT_RUN).toBeDefined();
+
+    const notRunStyle = getStatusStyle('NOT_RUN');
+    expect(notRunStyle.label).toBe('Not Run');
+
+    const preflightStyle = getStatusStyle('preflight');
+    expect(preflightStyle.label).toBe('Preflight');
+
+    const unknownStyle = getStatusStyle('CUSTOM_WEIRD_STATE');
+    expect(unknownStyle.bg).toBe(DEFAULT_STATUS_STYLE.bg);
+    expect(unknownStyle.label).toBe('CUSTOM_WEIRD_STATE');
   });
 });

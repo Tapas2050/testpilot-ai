@@ -5,6 +5,39 @@ import { StageStepper } from '../components/StageStepper';
 import { Banner } from '../components/Banner';
 import { ScreenshotViewer } from '../components/ScreenshotViewer';
 import { getStatusStyle } from '../utils/statusStyles';
+import { api } from '../api/client';
+
+function getFailureHint(stage, errorMsg) {
+  const msg = (errorMsg || '').toLowerCase();
+  const st = (stage || '').toUpperCase();
+
+  if (msg.includes('did not respond') || msg.includes('is it running')) {
+    return 'Make sure the target application is running and accessible at the configured URL.';
+  }
+  if (msg.includes('playwright mcp') || msg.includes('node process')) {
+    return 'Verify Node.js and Playwright MCP server dependencies are installed and accessible.';
+  }
+  if (
+    msg.includes('stored credential') ||
+    msg.includes('credential_encryption_key') ||
+    msg.includes('authentication failed')
+  ) {
+    return 'Check that project credentials and encryption keys are correctly configured in Project Settings.';
+  }
+  if (msg.includes('time limit') || msg.includes('deadline')) {
+    return 'The run exceeded its maximum time limit. Consider reducing the scope of test scenarios or checking target responsiveness.';
+  }
+  if (msg.includes('environment_failure') || msg.includes('tool call timeout')) {
+    return 'A browser interaction timed out or the browser environment failed. Check target app performance.';
+  }
+  if (st === 'PREFLIGHT') {
+    return 'Preflight checks failed before starting tests. Review target URL and environment connectivity.';
+  }
+  if (st === 'PLANNING') {
+    return 'Test planning could not be completed. Check project requirements and documentation.';
+  }
+  return 'Review the error details and system logs before starting a new run.';
+}
 
 const ACTION_BADGES = {
   click: { bg: '#E0F2FE', text: '#0369A1' },
@@ -40,6 +73,7 @@ export function TestRunPage() {
 
   const [expandedTestIds, setExpandedTestIds] = useState({});
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [startingNewRun, setStartingNewRun] = useState(false);
   const feedEndRef = useRef(null);
 
   // Elapsed-time counter
@@ -102,6 +136,18 @@ export function TestRunPage() {
       </div>
     );
   }
+  const handleStartNewRun = async () => {
+    if (!run?.project_id) return;
+    try {
+      setStartingNewRun(true);
+      const newRun = await api.runs.create(run.project_id);
+      navigate(`/projects/${run.project_id}/runs/${newRun.id}`);
+    } catch (err) {
+      alert(err.message || 'Failed to start new test run');
+    } finally {
+      setStartingNewRun(false);
+    }
+  };
 
   const resultsMap = (results || []).reduce((acc, r) => {
     acc[r.test_case_id] = r;
@@ -109,12 +155,29 @@ export function TestRunPage() {
   }, {});
 
   const totalTests = run?.total_tests || testCases.length || 0;
-  const completedTests = run?.completed_tests ?? results.length ?? 0;
   const passCount = run?.passed_tests ?? results.filter((r) => r.status === 'PASSED').length;
   const failCount = run?.failed_tests ?? results.filter((r) => r.status === 'FAILED').length;
+  const blockedCount =
+    run?.blocked_tests ??
+    results.filter(
+      (r) => r.status === 'BLOCKED' && !(r.error_message || '').startsWith('Not executed:')
+    ).length;
+  const notRunCount =
+    run?.not_run_tests ??
+    testCases.filter((tc) => {
+      const res = resultsMap[tc.id];
+      const st = res ? res.status : tc.status;
+      const err = res?.error_message || '';
+      return st === 'NOT_RUN' || err.startsWith('Not executed:') || (isTerminal && !res && st === 'PENDING');
+    }).length;
+  const completedTests = run?.completed_tests ?? (passCount + failCount + blockedCount);
   const progressPercent = totalTests > 0 ? Math.min(100, Math.round((completedTests / totalTests) * 100)) : 0;
 
-  const currentStage = run?.current_stage || run?.agent_stage || (run?.status === 'COMPLETED' ? 'COMPLETED' : 'QUEUED');
+  const currentStage =
+    run?.failed_stage ||
+    run?.current_stage ||
+    run?.agent_stage ||
+    (run?.status === 'COMPLETED' ? 'COMPLETED' : 'QUEUED');
   const statusStyle = getStatusStyle(run?.status);
 
   // Friendly state message when in early stages
@@ -255,7 +318,35 @@ export function TestRunPage() {
               type="error"
               title="Test Run Failed"
               message={`Execution stopped during stage ${currentStage}: ${run?.error_message || 'An unexpected execution error occurred.'}`}
-            />
+            >
+              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#7F1D1D' }}>{`Failed in Stage: ${currentStage}`}</div>
+                <div style={{ fontSize: '13px', color: '#7F1D1D' }}>
+                  <strong>Hint: </strong>{getFailureHint(currentStage, run?.error_message)}
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={handleStartNewRun}
+                    disabled={startingNewRun}
+                    style={{
+                      marginTop: '6px',
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      backgroundColor: '#DC2626',
+                      color: '#FFFFFF',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: startingNewRun ? 'not-allowed' : 'pointer',
+                      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                    }}
+                  >
+                    {startingNewRun ? 'Starting...' : 'Start a new run'}
+                  </button>
+                </div>
+              </div>
+            </Banner>
           </div>
         )}
 
@@ -270,7 +361,7 @@ export function TestRunPage() {
         )}
 
         {/* Stage Stepper */}
-        <StageStepper currentStage={currentStage} runStatus={run?.status} />
+        <StageStepper currentStage={currentStage} runStatus={run?.status} failedStage={run?.failed_stage} />
 
         {/* Overall Progress Bar & Elapsed Time */}
         {totalTests > 0 && (
@@ -484,8 +575,8 @@ export function TestRunPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-              gap: '16px',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gap: '14px',
               marginBottom: '28px',
             }}
           >
@@ -504,6 +595,14 @@ export function TestRunPage() {
             <div style={{ padding: '16px', backgroundColor: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
               <div style={{ fontSize: '12px', color: '#DC2626' }}>Failed</div>
               <div style={{ fontSize: '20px', fontWeight: 600, marginTop: '4px', color: '#DC2626' }}>{failCount}</div>
+            </div>
+            <div style={{ padding: '16px', backgroundColor: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+              <div style={{ fontSize: '12px', color: '#D97706' }}>Blocked</div>
+              <div style={{ fontSize: '20px', fontWeight: 600, marginTop: '4px', color: '#D97706' }}>{blockedCount}</div>
+            </div>
+            <div style={{ padding: '16px', backgroundColor: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+              <div style={{ fontSize: '12px', color: '#64748B' }}>Not Run</div>
+              <div style={{ fontSize: '20px', fontWeight: 600, marginTop: '4px', color: '#64748B' }}>{notRunCount}</div>
             </div>
           </div>
         )}
@@ -540,8 +639,15 @@ export function TestRunPage() {
                 const res = resultsMap[tc.id];
                 const isExpanded = !!expandedTestIds[tc.id];
 
-                // Live status badge: Pending, Running, Passed, Failed, Blocked
-                const effectiveStatus = res ? res.status : (tc.status || 'PENDING');
+                const resError = res?.error_message || tc.error_message || '';
+                const isNotRun =
+                  res?.status === 'NOT_RUN' ||
+                  tc.status === 'NOT_RUN' ||
+                  resError.startsWith('Not executed:') ||
+                  (isTerminal && !res && tc.status === 'PENDING');
+
+                // Live status badge: Pending, Running, Passed, Failed, Blocked, Not Run
+                const effectiveStatus = isNotRun ? 'NOT_RUN' : (res ? res.status : (tc.status || 'PENDING'));
                 const testStatusStyle = getStatusStyle(effectiveStatus);
                 const resultBadge = (
                   <span
@@ -555,7 +661,7 @@ export function TestRunPage() {
                       border: `1px solid ${testStatusStyle.border}`,
                     }}
                   >
-                    {effectiveStatus}
+                    {effectiveStatus === 'NOT_RUN' ? 'Not Run' : effectiveStatus}
                   </span>
                 );
 
@@ -650,6 +756,38 @@ export function TestRunPage() {
                                 </li>
                               ))}
                             </ol>
+                          </div>
+                        )}
+
+                        {resError && (
+                          <div
+                            style={{
+                              marginTop: '14px',
+                              padding: '10px 14px',
+                              backgroundColor: isNotRun ? '#F1F5F9' : '#FEF2F2',
+                              border: `1px solid ${isNotRun ? '#CBD5E1' : '#FECACA'}`,
+                              borderRadius: '6px',
+                              color: isNotRun ? '#475569' : '#991B1B',
+                              fontSize: '13px',
+                            }}
+                          >
+                            <strong>Reason: </strong> {resError}
+                          </div>
+                        )}
+
+                        {!res && isTerminal && !resError && (
+                          <div
+                            style={{
+                              marginTop: '14px',
+                              padding: '10px 14px',
+                              backgroundColor: '#F1F5F9',
+                              border: '1px solid #CBD5E1',
+                              borderRadius: '6px',
+                              color: '#475569',
+                              fontSize: '13px',
+                            }}
+                          >
+                            <strong>Reason: </strong> Not executed: run stopped ({run?.error_message || 'terminated early'})
                           </div>
                         )}
 

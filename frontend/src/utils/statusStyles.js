@@ -6,6 +6,7 @@
 export const STATUS_STYLES = {
   // Run-level lifecycle statuses & agent stages
   QUEUED: { bg: '#FEF3C7', text: '#92400E', border: '#FCD34D', badgeClass: 'badge-warning', label: 'Queued' },
+  PREFLIGHT: { bg: '#DBEAFE', text: '#1E40AF', border: '#93C5FD', badgeClass: 'badge-info', label: 'Preflight' },
   PLANNING: { bg: '#DBEAFE', text: '#1E40AF', border: '#93C5FD', badgeClass: 'badge-info', label: 'Planning' },
   EXECUTING: { bg: '#DBEAFE', text: '#1E40AF', border: '#93C5FD', badgeClass: 'badge-info', label: 'Executing' },
   ANALYZING: { bg: '#EDE9FE', text: '#5B21B6', border: '#C4B5FD', badgeClass: 'badge-info', label: 'Analyzing' },
@@ -19,6 +20,7 @@ export const STATUS_STYLES = {
   PENDING: { bg: '#F1F5F9', text: '#64748B', border: '#CBD5E1', badgeClass: 'badge-secondary', label: 'Pending' },
   PASSED: { bg: '#DCFCE7', text: '#166534', border: '#86EFAC', badgeClass: 'badge-pass', label: 'Passed' },
   BLOCKED: { bg: '#FEF3C7', text: '#92400E', border: '#FCD34D', badgeClass: 'badge-warning', label: 'Blocked' },
+  NOT_RUN: { bg: '#F1F5F9', text: '#475569', border: '#CBD5E1', badgeClass: 'badge-secondary', label: 'Not Run' },
 };
 
 export const DEFAULT_STATUS_STYLE = {

@@ -737,6 +737,7 @@ async def _finalize_run(
     db_url: Optional[str] = None,
     exit_status: Optional[str] = None,
     error_message: Optional[str] = None,
+    failed_stage: Optional[str] = None,
 ) -> None:
     """Guaranteed clean finalization for test runs on ANY exit.
 
@@ -781,6 +782,8 @@ async def _finalize_run(
 
                     run.status = final_status
                     run.error_message = final_err
+                    if final_status == "FAILED":
+                        run.failed_stage = failed_stage or "QUEUED"
                     run.completed_at = now
                     run.cancel_requested = (final_status == "CANCELLED")
 
@@ -805,10 +808,11 @@ async def _finalize_run(
 
                 for tc in tcs:
                     if tc.id not in existing_tc_ids:
+                        reason_str = f"Not executed: run stopped ({final_err})"
                         blocked_res = TestResult(
                             test_case_id=tc.id,
                             status="BLOCKED",
-                            error_message="Test did not finish before run terminated",
+                            error_message=reason_str,
                         )
                         session.add(blocked_res)
                         existing_results.append(blocked_res)
@@ -832,12 +836,14 @@ async def _finalize_run(
                 session.add(run)
                 await session.commit()
 
-                # Update Redis status cache
+                # Update Redis status cache (never overwrite stage with FAILED)
+                cache_stage = run.failed_stage or run.status
                 await cache_run_status(
                     run_id,
                     status=run.status,
-                    stage=run.status,
+                    stage=cache_stage,
                     error=run.error_message,
+                    failed_stage=run.failed_stage,
                 )
             elif exit_status:
                 if user_cancelled or exit_status == "CANCELLED":
@@ -850,6 +856,7 @@ async def _finalize_run(
                     run_id,
                     status=final_status,
                     error_message=final_err,
+                    failed_stage=failed_stage if final_status == "FAILED" else None,
                     completed_at=now,
                     cancel_requested=(final_status == "CANCELLED"),
                     db_url=db_url,
@@ -1032,6 +1039,7 @@ async def execute_agent_run(
                 db_url=db_url,
                 exit_status=exit_status,
                 error_message=err_msg,
+                failed_stage=active_stage if exit_status == "FAILED" else None,
             )
         )
         logger.info(

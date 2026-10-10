@@ -14,7 +14,7 @@ from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.rate_limit import rate_limit_create_run
 from app.models.project import Project
-from app.models.test_run import TestRun
+from app.models.test_run import TestCase, TestRun
 from app.models.user import User
 from app.services.run_service import (
     ACTIVE_STATUSES,
@@ -32,6 +32,18 @@ router = APIRouter(tags=["runs"])
 
 
 # Pydantic schemas
+class TestResultResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    test_case_id: uuid.UUID
+    status: str
+    error_message: Optional[str] = None
+    steps: Optional[list[dict[str, Any]]] = None
+    duration_seconds: Optional[float] = None
+    screenshot_path: Optional[str] = None
+
+
 class TestCaseResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -42,6 +54,7 @@ class TestCaseResponse(BaseModel):
     target_role: Optional[str] = None
     status: str
     order_index: int
+    error_message: Optional[str] = None
 
 
 class RunDetailResponse(BaseModel):
@@ -54,9 +67,11 @@ class RunDetailResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    failed_stage: Optional[str] = None
     cancel_requested: bool
     report: Optional[dict[str, Any]] = None
     test_cases: list[TestCaseResponse] = []
+    results: list[TestResultResponse] = []
 
     # Live progress fields
     agent_stage: Optional[str] = None
@@ -67,6 +82,8 @@ class RunDetailResponse(BaseModel):
     completed_tests: Optional[int] = 0
     passed_tests: Optional[int] = 0
     failed_tests: Optional[int] = 0
+    blocked_tests: Optional[int] = 0
+    not_run_tests: Optional[int] = 0
     recent_events: list[dict[str, Any]] = []
 
 
@@ -80,10 +97,13 @@ class RunSummaryResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    failed_stage: Optional[str] = None
     cancel_requested: bool
     total_tests: int = 0
     passed_tests: int = 0
     failed_tests: int = 0
+    blocked_tests: int = 0
+    not_run_tests: int = 0
 
 
 @router.post(
@@ -156,7 +176,7 @@ async def get_test_run(
     """Get the status and details of a test run."""
     stmt = (
         select(TestRun)
-        .options(selectinload(TestRun.test_cases))
+        .options(selectinload(TestRun.test_cases).selectinload(TestCase.results))
         .join(Project, TestRun.project_id == Project.id)
         .where(TestRun.id == run_id, Project.user_id == user.id)
     )
@@ -177,17 +197,79 @@ async def get_test_run(
     recent_events = await get_live_step_events(run_id)
 
     total_tests = len(run.test_cases)
-    completed_tests = sum(
-        1 for tc in run.test_cases if tc.status in ("PASSED", "FAILED", "BLOCKED")
-    )
-    passed_tests = sum(1 for tc in run.test_cases if tc.status == "PASSED")
-    failed_tests = sum(1 for tc in run.test_cases if tc.status == "FAILED")
+    passed_tests = 0
+    failed_tests = 0
+    blocked_tests = 0
+    not_run_tests = 0
+    all_results = []
+    tc_responses = []
 
-    current_stage = (
-        progress.get("stage")
-        or (cached.get("stage") if cached else None)
-        or (run.status if run.status in ACTIVE_STATUSES else "QUEUED")
+    for tc in run.test_cases:
+        res = tc.results[0] if tc.results else None
+        if tc.results:
+            all_results.extend(tc.results)
+
+        st = res.status if res else tc.status
+        err = (res.error_message if res else "") or ""
+
+        if st == "PASSED":
+            passed_tests += 1
+        elif st == "FAILED":
+            failed_tests += 1
+        elif (
+            st == "NOT_RUN"
+            or err.startswith("Not executed: run stopped")
+            or "did not finish before run terminated" in err
+        ):
+            not_run_tests += 1
+        elif st == "BLOCKED":
+            blocked_tests += 1
+        elif st == "PENDING":
+            if run.status in ("COMPLETED", "FAILED", "CANCELLED"):
+                not_run_tests += 1
+
+        tc_responses.append(
+            TestCaseResponse(
+                id=tc.id,
+                title=tc.title,
+                description=tc.description,
+                source_requirement=tc.source_requirement,
+                target_role=tc.target_role,
+                status=st,
+                order_index=tc.order_index,
+                error_message=err if err else None,
+            )
+        )
+
+    # Honest progress: count only tests that actually finished
+    completed_tests = passed_tests + failed_tests + blocked_tests
+
+    failed_stage = (
+        run.failed_stage
+        or (cached.get("failed_stage") if cached else None)
     )
+
+    if run.status == "FAILED":
+        current_stage = (
+            failed_stage
+            or (cached.get("stage") if cached else None)
+            or progress.get("stage")
+            or "QUEUED"
+        )
+    elif run.status == "COMPLETED":
+        current_stage = "COMPLETED"
+    elif run.status in ACTIVE_STATUSES:
+        current_stage = (
+            progress.get("stage")
+            or (cached.get("stage") if cached else None)
+            or run.status
+        )
+    else:
+        current_stage = (
+            (cached.get("stage") if cached else None)
+            or progress.get("stage")
+            or "QUEUED"
+        )
 
     effective_status = run.status
     if cached and run.status in ACTIVE_STATUSES:
@@ -201,17 +283,21 @@ async def get_test_run(
         started_at=run.started_at,
         completed_at=run.completed_at,
         error_message=run.error_message,
+        failed_stage=failed_stage,
         cancel_requested=run.cancel_requested,
         report=run.report,
-        test_cases=run.test_cases,
+        test_cases=tc_responses,
+        results=all_results,
         agent_stage=current_stage,
         current_stage=current_stage,
         current_test=progress.get("current_test"),
         current_step=progress.get("current_step"),
-        total_tests=progress.get("total_tests", total_tests) or total_tests,
-        completed_tests=progress.get("completed_tests", completed_tests) or completed_tests,
+        total_tests=total_tests,
+        completed_tests=completed_tests,
         passed_tests=passed_tests,
         failed_tests=failed_tests,
+        blocked_tests=blocked_tests,
+        not_run_tests=not_run_tests,
         recent_events=recent_events,
     )
 

@@ -61,6 +61,9 @@ def setup_test_db_schema():
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all)
 
+        from app.core.database import ensure_db_schema
+        await ensure_db_schema(test_engine)
+
         from app.agent.checkpointer import get_checkpointer
         get_checkpointer(test_db_url).setup()
 

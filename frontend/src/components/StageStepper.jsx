@@ -2,6 +2,7 @@ import React from 'react';
 
 const STAGES = [
   { key: 'QUEUED', label: 'Queued' },
+  { key: 'PREFLIGHT', label: 'Preflight' },
   { key: 'PLANNING', label: 'Planning' },
   { key: 'EXECUTING', label: 'Executing' },
   { key: 'ANALYZING', label: 'Analyzing' },
@@ -9,16 +10,16 @@ const STAGES = [
   { key: 'COMPLETED', label: 'Completed' },
 ];
 
-export function StageStepper({ currentStage, runStatus }) {
+export function StageStepper({ currentStage, runStatus, failedStage }) {
   const isCompleted = runStatus === 'COMPLETED';
   const isFailed = runStatus === 'FAILED';
   const isCancelled = runStatus === 'CANCELLED';
 
   // Normalize current stage index
-  const normalizedStage = (currentStage || (isCompleted ? 'COMPLETED' : 'QUEUED')).toUpperCase();
-  let currentStageIndex = STAGES.findIndex((s) => s.key === normalizedStage);
+  const effectiveStage = (failedStage || currentStage || (isCompleted ? 'COMPLETED' : 'QUEUED')).toUpperCase();
+  let currentStageIndex = STAGES.findIndex((s) => s.key === effectiveStage);
   if (currentStageIndex === -1) {
-    currentStageIndex = isCompleted ? 5 : 0;
+    currentStageIndex = isCompleted ? STAGES.length - 1 : 0;
   }
 
   return (

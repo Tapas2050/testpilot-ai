@@ -81,3 +81,15 @@ async def check_db_health() -> Dict[str, Any]:
             "pgvector_enabled": False,
             "error": "database connection failed",
         }
+
+
+async def ensure_db_schema(target_engine: Optional[Any] = None) -> None:
+    """Ensure database schema has required columns for non-Alembic setup."""
+    eng = target_engine or engine
+    try:
+        async with eng.begin() as conn:
+            await conn.execute(
+                text("ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS failed_stage VARCHAR(32);")
+            )
+    except Exception as exc:
+        logger.warning("ensure_db_schema warning: %s", exc)

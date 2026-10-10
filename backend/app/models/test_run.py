@@ -44,6 +44,7 @@ class TestRun(Base):
         DateTime(timezone=True), nullable=True
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    failed_stage: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     report: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 

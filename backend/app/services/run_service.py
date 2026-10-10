@@ -78,7 +78,11 @@ async def check_worker_heartbeat(run_id: uuid.UUID) -> bool:
 
 
 async def cache_run_status(
-    run_id: uuid.UUID, status: str, stage: str, error: Optional[str] = None
+    run_id: uuid.UUID,
+    status: str,
+    stage: str,
+    error: Optional[str] = None,
+    failed_stage: Optional[str] = None,
 ) -> None:
     """Cache the current status and stage in Redis."""
     redis = get_redis_client()
@@ -86,6 +90,7 @@ async def cache_run_status(
         "run_id": str(run_id),
         "status": status,
         "stage": stage,
+        "failed_stage": failed_stage,
         "error": error,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -110,6 +115,7 @@ async def update_run_in_db(
     started_at: Optional[datetime] = None,
     completed_at: Optional[datetime] = None,
     error_message: Optional[str] = None,
+    failed_stage: Optional[str] = None,
     report: Optional[dict[str, Any]] = None,
     cancel_requested: Optional[bool] = None,
     session: Optional[AsyncSession] = None,
@@ -125,6 +131,8 @@ async def update_run_in_db(
         values["completed_at"] = completed_at
     if error_message is not None:
         values["error_message"] = error_message
+    if failed_stage is not None:
+        values["failed_stage"] = failed_stage
     if report is not None:
         values["report"] = report
     if cancel_requested is not None:
@@ -259,6 +267,7 @@ async def check_and_fail_dead_run(run: TestRun, session: AsyncSession) -> bool:
         run.id,
         age_seconds,
     )
+    run.failed_stage = run.status if run.status != "FAILED" else "QUEUED"
     run.status = "FAILED"
     run.error_message = "Worker stopped responding"
     run.completed_at = now
@@ -288,7 +297,7 @@ async def check_and_fail_dead_run(run: TestRun, session: AsyncSession) -> bool:
                 blocked_res = TestResult(
                     test_case_id=tc.id,
                     status="BLOCKED",
-                    error_message="Test did not finish before run terminated",
+                    error_message="Not executed: run stopped (Worker stopped responding)",
                 )
                 session.add(blocked_res)
                 existing_results.append(blocked_res)
@@ -318,7 +327,8 @@ async def check_and_fail_dead_run(run: TestRun, session: AsyncSession) -> bool:
     await cache_run_status(
         run.id,
         status="FAILED",
-        stage="FAILED",
+        stage=run.failed_stage or "QUEUED",
+        failed_stage=run.failed_stage or "QUEUED",
         error="Worker stopped responding",
     )
     await release_run_lock(run.project_id)
