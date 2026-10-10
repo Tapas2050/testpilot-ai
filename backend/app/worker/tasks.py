@@ -103,6 +103,17 @@ async def run_agent_job(
         )
 
 
+async def worker_startup(ctx: dict[str, Any]) -> None:
+    """Preload process-level singleton embedding model during worker process initialization."""
+    from app.services.embedder import get_embedding_model
+
+    logger.info("Worker process starting up; preloading embedding model singleton...")
+    try:
+        get_embedding_model()
+    except Exception as exc:
+        logger.warning("Could not preload embedding model on worker startup: %s", exc)
+
+
 class WorkerSettings:
     """Configuration for arq worker process."""
 
@@ -112,6 +123,7 @@ class WorkerSettings:
     job_timeout = get_settings().RUN_TIMEOUT_SECONDS + 300
     max_tries = 1
     retry_jobs = False
+    on_startup = worker_startup
 
 
 async def enqueue_agent_job(

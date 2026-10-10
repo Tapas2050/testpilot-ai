@@ -1,8 +1,20 @@
 """Local embedding generator using sentence-transformers."""
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from app.core.config import get_settings
+
+_process_model_cache: dict[str, Any] = {}
+
+
+def get_embedding_model(model_name: Optional[str] = None) -> Any:
+    """Process-level singleton loader for SentenceTransformer to avoid loading weights per job."""
+    name = model_name or get_settings().EMBEDDING_MODEL
+    if name not in _process_model_cache:
+        from sentence_transformers import SentenceTransformer
+
+        _process_model_cache[name] = SentenceTransformer(name, device="cpu")
+    return _process_model_cache[name]
 
 
 class LocalEmbedder:
@@ -10,16 +22,10 @@ class LocalEmbedder:
 
     def __init__(self, model_name: Optional[str] = None):
         self._model_name = model_name
-        self._model = None
 
     def _get_model(self):
-        """Lazy loader for the SentenceTransformer model to obey memory constraints."""
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
-            model_name = self._model_name or get_settings().EMBEDDING_MODEL
-            self._model = SentenceTransformer(model_name, device="cpu")
-        return self._model
+        """Lazy loader returning the process-level singleton SentenceTransformer."""
+        return get_embedding_model(self._model_name)
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Compute embeddings for a list of text strings."""
