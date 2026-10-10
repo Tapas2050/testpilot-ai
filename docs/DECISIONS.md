@@ -157,3 +157,14 @@ Decision:
 - Worker emits structured INFO logs with `[run_id=...]` for every stage change, test start/end, and sanitized executor step, plus total live LLM calls at run completion.
 Consequences: Zero credential discrepancies; complete visibility into agent runs; safe lock lifecycles.
 
+## D-026 Worker Job Timeout Alignment, Single-Try Semantics, and Graceful In-Job Timeout
+Status: Accepted
+Context: An empirical agent run timed out at exactly 300.34s during test 8 of 8 because arq defaults to `job_timeout = 300` seconds (5 minutes) and `max_tries = 5` with `retry_jobs = True`. Furthermore, failed/cancelled runs were subject to automatic arq retries from scratch, repeating browser interactions, LLM token consumption, and target mutations.
+Decision:
+- Configure `WorkerSettings.job_timeout = settings.RUN_TIMEOUT_SECONDS + 300` (default 2100s).
+- Configure `WorkerSettings.max_tries = 1` and `WorkerSettings.retry_jobs = False`. An AI agent test run has non-idempotent side effects across browser sessions, target databases, and user reports; runs must never be silently re-executed from scratch on failure or cancellation.
+- Enforce `RUN_TIMEOUT_SECONDS` (default 1800s) gracefully inside the job (`execute_agent_run` and `run_agent_job`) using `asyncio.wait_for`. When the in-job limit is reached, an in-job `asyncio.TimeoutError` triggers graceful cleanup: updating the run to FAILED with error message `"Run exceeded the time limit of N seconds"`, marking remaining tests BLOCKED, releasing Redis locks, and closing MCP processes.
+- The 300-second delta (`job_timeout` minus `RUN_TIMEOUT_SECONDS`) guarantees that arq's hard process-level kill is strictly a last resort if graceful finalization hangs.
+Consequences: Prevents premature 5-minute worker kills; guarantees graceful finalization before hard timeouts; eliminates duplicated re-execution of failed runs.
+
+

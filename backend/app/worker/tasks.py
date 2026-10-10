@@ -32,12 +32,22 @@ async def run_agent_job(
         settings = get_settings()
         db_url = str(settings.DATABASE_URL)
 
+    settings = get_settings()
     try:
-        await execute_agent_run(
-            run_id=run_id,
-            project_id=project_id,
-            db_url=db_url,
-            force_fail_at=force_fail_at,
+        await asyncio.wait_for(
+            execute_agent_run(
+                run_id=run_id,
+                project_id=project_id,
+                db_url=db_url,
+                force_fail_at=force_fail_at,
+            ),
+            timeout=float(settings.RUN_TIMEOUT_SECONDS),
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "[run_id=%s] Run exceeded the time limit of %d seconds",
+            run_id,
+            settings.RUN_TIMEOUT_SECONDS,
         )
     finally:
         logger.info(
@@ -65,6 +75,9 @@ class WorkerSettings:
     functions = [run_agent_job]
     redis_settings = get_redis_settings()
     max_jobs = 1  # Respect D-018: execute 1 test run at a time to stay within memory limits
+    job_timeout = get_settings().RUN_TIMEOUT_SECONDS + 300
+    max_tries = 1
+    retry_jobs = False
 
 
 async def enqueue_agent_job(

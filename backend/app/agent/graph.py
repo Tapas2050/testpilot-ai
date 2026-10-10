@@ -1,5 +1,6 @@
 """LangGraph agent orchestration graph with stub nodes for Phase 8."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from app.agent.checkpointer import get_checkpointer
 from app.agent.llm import get_live_call_count
 from app.agent.state import AgentState
+from app.core.config import get_settings
 from app.core.database import get_async_session_factory
 from app.models.test_run import TestCase
 from app.services.run_service import (
@@ -592,15 +594,30 @@ async def execute_agent_run(
     }
 
     logger.info("[run_id=%s] Agent run started for project %s", run_id, project_id)
+    settings = get_settings()
     try:
         # Check if forced failure requested for testing T8.3
         if force_fail_at == "start":
             raise RuntimeError("Forced node exception during execution")
 
-        async for _output in graph.astream(initial_state, config=config):
-            if force_fail_at == "midway":
-                raise RuntimeError("Forced node exception midway through execution")
+        async def _stream_graph():
+            async for _output in graph.astream(initial_state, config=config):
+                if force_fail_at == "midway":
+                    raise RuntimeError("Forced node exception midway through execution")
 
+        await asyncio.wait_for(_stream_graph(), timeout=float(settings.RUN_TIMEOUT_SECONDS))
+
+    except asyncio.TimeoutError:
+        err_msg = f"Run exceeded the time limit of {settings.RUN_TIMEOUT_SECONDS} seconds"
+        logger.error("[run_id=%s] %s", run_id, err_msg)
+        status = "FAILED"
+        now = datetime.now(timezone.utc)
+        await update_run_in_db(
+            run_id, status=status, completed_at=now, error_message=err_msg, db_url=db_url
+        )
+        await cache_run_status(run_id, status=status, stage=status, error=err_msg)
+        await update_live_progress(run_id, stage=status)
+        await release_run_lock(project_id)
     except Exception as exc:
         err_msg = str(exc)
         logger.error("[run_id=%s] Agent run failed with exception: %s", run_id, err_msg)
