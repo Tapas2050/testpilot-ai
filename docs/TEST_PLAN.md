@@ -121,6 +121,14 @@ Phase 15 (Worker Timeout, Stuck-Run, and Cleanup Hardening)
 - T15.6 LLM per-request timeout & fast quota fallback: LLM_REQUEST_TIMEOUT_SECONDS (60s default) configured; daily-quota 429 errors bypass retry loops to fall back immediately; provider failure marks test BLOCKED (ENVIRONMENT_FAILURE); 2 consecutive provider failures aborts run as FAILED.
 - T15.7 Process-level embedding singleton: LocalEmbedder reuses process-level SentenceTransformer singleton without reloading weights per job; worker preloads embedding model once in WorkerSettings.on_startup.
 
+Phase 16 (False 28s Timeout Bug, Preflight Checks, and Honest State Reporting)
+- T16.1 Inner timeout isolation: inner TimeoutError (MCP startup, tool, LLM) never misreported as whole-run deadline; monotonic deadline check verified.
+- T16.2 Live browser smoke test: smoke_browser.py starts Playwright MCP, completes handshake, navigates to /login, captures screenshot, and terminates cleanly with 0 orphan processes in ~10 seconds.
+- T16.3 Secret sanitization in failure reports: sanitize_secret_values redacts db passwords, bearer tokens, API keys, and project passwords in error messages and logs.
+- T16.4 Preflight checks before planning: fast (~1-3s, max 10s) target reachability, Playwright MCP handshake, and credential decryption checks abort run cleanly without spending LLM tokens.
+- T16.5 Honest failure stage and unexecuted tests: test_runs.failed_stage preserves failure stage; stepper marks failed stage red while keeping earlier stages ticked; unexecuted tests marked with reason "Not executed: run stopped (<cause>)"; progress bar counts only executed tests.
+- T16.6 Worker startup stale job draining: worker_startup inspects arq queue and logs single consolidated INFO line for skipped stale jobs; unified project_run_lock key documented across docs and README.
+
 ## 4. Agent Quality Metrics (record in MEMORY.md after each eval run)
 - Planned tests traceable to a requirement: target 100 percent
 - Planted defects found on the defective build: target 3 of 3

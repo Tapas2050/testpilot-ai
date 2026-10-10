@@ -146,7 +146,23 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Visit **http://localhost:5173** in your browser.
+### 7. Redis Operational Keys & Manual Cleanup
+
+TestPilot uses unified Redis keys (DB 0 for app runtime, DB 1 for testing):
+- **Project Run Lock**: `project_run_lock:{project_id}` (Prevents duplicate concurrent runs for the project; TTL 900s)
+- **Worker Heartbeat**: `worker_heartbeat:{run_id}` (Liveness heartbeat refreshed every 15s; TTL 60s)
+- **Run Progress**: `run_progress:{run_id}` (Live execution counters: completed/total tests; TTL 1800s)
+- **Run Step Events**: `run_events:{run_id}` (Live streaming step events; TTL 1800s)
+- **Cached Run Status**: `run_status:{run_id}` (Cached status, stage, error message; TTL 1800s)
+- **Cancellation Flag**: `run_cancel:{run_id}` (User cancel request flag; TTL 900s)
+
+To manually release a stuck lock or clean up run state in WSL2:
+```bash
+redis-cli del "project_run_lock:<project_id>"
+redis-cli del "worker_heartbeat:<run_id>"
+redis-cli del "run_progress:<run_id>"
+redis-cli del "run_events:<run_id>"
+```
 
 ---
 

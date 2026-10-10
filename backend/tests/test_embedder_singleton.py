@@ -51,3 +51,22 @@ async def test_worker_startup_preloads_singleton():
 
         assert mock_st_cls.call_count == 1
         assert WorkerSettings.on_startup is worker_startup
+
+
+@pytest.mark.asyncio
+async def test_worker_startup_skips_stale_jobs_with_single_info_line(caplog):
+    """Verify worker_startup logs exactly one INFO line for stale jobs skipped."""
+    import logging
+    from unittest.mock import AsyncMock
+
+    mock_redis = AsyncMock()
+    mock_redis.zrange.return_value = []
+
+    with caplog.at_level(logging.INFO):
+        with patch("sentence_transformers.SentenceTransformer"):
+            ctx = {"redis": mock_redis}
+            await worker_startup(ctx)
+
+    stale_logs = [r.message for r in caplog.records if "stale job(s) skipped" in r.message]
+    assert len(stale_logs) == 1
+    assert "Worker startup: 0 stale job(s) skipped" in stale_logs[0]

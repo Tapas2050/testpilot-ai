@@ -51,6 +51,13 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - JWT decoding requires explicit `algorithms=["HS256"]` and verifies `exp`, `sub`, and `jti`.
 - Email handling: stripped and lowercased on registration and login.
 - Redis health check uses scoped connection per check to prevent closed event loop errors across test runs.
+- Redis Key Patterns & Cleanup (DB 0 runtime, DB 1 tests):
+  - Duplicate-run lock: `project_run_lock:{project_id}` (TTL 900s). Cleanup: `redis-cli del "project_run_lock:<project_id>"`
+  - Worker heartbeat: `worker_heartbeat:{run_id}` (TTL 60s, refreshed every 15s). Cleanup: `redis-cli del "worker_heartbeat:<run_id>"`
+  - Live progress: `run_progress:{run_id}` (TTL 1800s, completed/total count). Cleanup: `redis-cli del "run_progress:<run_id>"`
+  - Step events: `run_events:{run_id}` (TTL 1800s, Redis list). Cleanup: `redis-cli del "run_events:<run_id>"`
+  - Run status cache: `run_status:{run_id}` (TTL 1800s, status/stage/failed_stage/error). Cleanup: `redis-cli del "run_status:<run_id>"`
+  - User cancel flag: `run_cancel:{run_id}` (TTL 900s). Cleanup: `redis-cli del "run_cancel:<run_id>"`
 - NPM commands on Windows PowerShell use `npm.cmd` / `npx.cmd` to bypass script execution policy restrictions.
 
 ## 6. Gotchas and Lessons

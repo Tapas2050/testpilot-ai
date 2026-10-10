@@ -131,3 +131,11 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] Part 5: Queue isolation with `TEST_REDIS_URL` in DB 1, `run_id` only payload, worker uses configured `DATABASE_URL` instead of job payload, missing run skipped cleanly with single short warning (D-030)
 - [x] Part 6: LLM per-request timeout (`LLM_REQUEST_TIMEOUT_SECONDS=60.0`), fast daily-quota 429 fallback bypassing retry loops, test marked BLOCKED with ENVIRONMENT_FAILURE on provider failure, run aborted early on 2 consecutive provider failures (D-031)
 - [x] Part 7: Embedding model singleton in `_process_model_cache` loaded once per worker process, preloaded on worker startup in `WorkerSettings.on_startup` (D-032)
+
+## False 28s Timeout Bug, Preflight Checks, and Honest State Reporting
+- [x] Part 1: Root cause analysis of real run `aced260c-f088-4589-85d0-ab96f6e01ddf` (cold launch Playwright MCP handshake timeout mislabeled as whole-run deadline), DB check, inner timeout reproduction
+- [x] Part 2: Live browser smoke test `backend/scripts/smoke_browser.py` without LLM calls, MCP process cwd resolution and handshake timeout hardening (D-033)
+- [x] Part 3: Monotonic whole-run deadline mechanism, inner timeout isolation with ENVIRONMENT_FAILURE, sanitized error message and traceback logging (D-035)
+- [x] Part 4: Fast preflight checks before planning (target reachability, MCP initialize handshake, credential decryption) with fail-fast user guidance (D-034)
+- [x] Part 5: Honest run state in backend and frontend (preserve real failed_stage, stepper red on failed stage, not-run test reasons, start-new-run button, separate summary tiles) (D-035)
+- [x] Part 6: Consolidated single INFO line for worker startup stale job skipping, unified `project_run_lock:{project_id}` key name and documented manual cleanup commands (D-036)

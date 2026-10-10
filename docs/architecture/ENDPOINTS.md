@@ -365,7 +365,7 @@ Defined in [backend/app/api/runs.py](file:///c:/dev/testpilot/backend/app/api/ru
 - **Database & Queue Actions**:
   - PostgreSQL `SELECT` verifying no active runs (`QUEUED`, `PLANNING`, `EXECUTING`, `ANALYZING`, `REPORTING`) exist for this project.
   - PostgreSQL `INSERT` into `test_runs` (`id`, `project_id`, `status='QUEUED'`, `created_at=now()`).
-  - Redis `SET run_lock:{project_id} {run_id} NX EX 900` via [app/services/run_service.py:acquire_run_lock](file:///c:/dev/testpilot/backend/app/services/run_service.py#L32).
+  - Redis `SET project_run_lock:{project_id} {run_id} NX EX 900` via [app/services/run_service.py:acquire_run_lock](file:///c:/dev/testpilot/backend/app/services/run_service.py#L32).
   - Redis `arq:queue` push: calls `enqueue_agent_job(new_run.id, project_id, db_url=target_db_url)` via [app/worker/tasks.py](file:///c:/dev/testpilot/backend/app/worker/tasks.py#L52).
 
 ### `GET /runs/{run_id}`
@@ -418,7 +418,7 @@ Defined in [backend/app/api/runs.py](file:///c:/dev/testpilot/backend/app/api/ru
 - **Database & Redis Actions**:
   - PostgreSQL `UPDATE test_runs SET cancel_requested = true WHERE id = run_id`.
   - Redis `SET run_cancel:{run_id} 1 EX 900` via [app/services/run_service.py:set_cancel_flag](file:///c:/dev/testpilot/backend/app/services/run_service.py#L65).
-  - Redis `DEL run_lock:{project_id}` via [app/services/run_service.py:release_run_lock](file:///c:/dev/testpilot/backend/app/services/run_service.py#L46).
+  - Redis `DEL project_run_lock:{project_id}` via [app/services/run_service.py:release_run_lock](file:///c:/dev/testpilot/backend/app/services/run_service.py#L46).
 
 ### `GET /runs/{run_id}/report`
 - **Method & Path**: `GET /runs/{run_id}/report`

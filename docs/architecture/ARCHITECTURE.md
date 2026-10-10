@@ -111,7 +111,7 @@ When TestPilot AI is fully operational, five distinct runtime processes interact
    - Hosts tables for users, sessions, projects, credentials, documents, vector chunks, test runs, test cases, results, and failures. Also hosts LangGraph checkpoint tables.
 7. **Redis Server (`localhost:6379`)**:
    - Redis server running inside WSL2 Ubuntu, exposed to Windows host on port `6379`.
-   - Acts as arq job queue, duplicate run lock (`run_lock`), cancel flag store (`run_cancel`), run status cache (`run_status`), and RAG query cache (`rag:`).
+   - Acts as arq job queue, duplicate run lock (`project_run_lock`), cancel flag store (`run_cancel`), run status cache (`run_status`), and RAG query cache (`rag:`).
 8. **External LLM Providers**:
    - Primary: **Google AI Studio** (`ChatGoogleGenerativeAI` via `https://generativelanguage.googleapis.com`).
    - Fallback: **OpenRouter** (`ChatOpenAI` via `https://openrouter.ai/api/v1`).
@@ -206,7 +206,7 @@ All configuration is centralized in [backend/app/core/config.py](file:///c:/dev/
 
 ### 5.1 Storage Partitioning Strategy
 - **PostgreSQL (`testpilot`)**: Source of truth for all relational models, user accounts, project metadata, encrypted credentials, document records, vector embeddings (`pgvector`), test cases, results, and LangGraph workflow checkpoints.
-- **Redis (`db 0`)**: Ephemeral operational cache. Holds `run_lock:{project_id}` (900s TTL), `run_cancel:{run_id}` (900s TTL), transient `run_status:{run_id}` stage updates, `rag:{project_id}:{query_hash}` search results (3600s TTL), rate limiting fixed-window counters, and `arq` task queue entries.
+- **Redis (`db 0`)**: Ephemeral operational cache. Holds `project_run_lock:{project_id}` (900s TTL), `run_cancel:{run_id}` (900s TTL), transient `run_status:{run_id}` stage updates, `rag:{project_id}:{query_hash}` search results (3600s TTL), rate limiting fixed-window counters, and `arq` task queue entries.
 - **Local Filesystem (`storage/`)**: Static binary artifacts. Raw uploaded requirements files stored in `storage/documents/{stored_name}` and execution screenshots stored in `storage/screenshots/{run_id}/{test_case_id}.png`.
 
 ### 5.2 Entity Relationship Diagram
@@ -476,7 +476,7 @@ When a user clicks **"Start Test Run"** in the frontend:
 
 1. **Frontend Call**: [frontend/src/pages/ProjectPage.jsx](file:///c:/dev/testpilot/frontend/src/pages/ProjectPage.jsx) dispatches `POST /api/projects/{project_id}/runs`.
 2. **API Handler**: [backend/app/api/runs.py:create_test_run](file:///c:/dev/testpilot/backend/app/api/runs.py#L83) verifies project ownership and checks database for active runs (`QUEUED`, `PLANNING`, `EXECUTING`, `ANALYZING`, `REPORTING`).
-3. **Duplicate-Run Lock**: [app/services/run_service.py:acquire_run_lock](file:///c:/dev/testpilot/backend/app/services/run_service.py#L32) sets Redis key `run_lock:{project_id}` using `SET NX EX 900`. If key exists, returns HTTP 409 Conflict.
+3. **Duplicate-Run Lock**: [app/services/run_service.py:acquire_run_lock](file:///c:/dev/testpilot/backend/app/services/run_service.py#L32) sets Redis key `project_run_lock:{project_id}` using `SET NX EX 900`. If key exists, returns HTTP 409 Conflict.
 4. **DB Row Creation**: Inserts `TestRun` row into PostgreSQL with status `QUEUED`.
 5. **arq Enqueue**: Calls `enqueue_agent_job()` ([backend/app/worker/tasks.py:L52](file:///c:/dev/testpilot/backend/app/worker/tasks.py#L52)), pushing job `run_agent_job` to Redis queue `arq:queue`. The API responds to the client immediately with HTTP 201.
 6. **Frontend Polling**: React component mounts [frontend/src/hooks/useRunStatus.js](file:///c:/dev/testpilot/frontend/src/hooks/useRunStatus.js) which polls `GET /api/runs/{run_id}` every 2000ms.
@@ -505,7 +505,7 @@ When a user clicks **"Start Test Run"** in the frontend:
     - Persists report to `test_runs.report` JSONB column.
 13. **Node 5 (`complete_node`)**:
     - Updates `test_runs.status = 'COMPLETED'` and sets `completed_at = now()`.
-    - Releases Redis lock `DEL run_lock:{project_id}`.
+    - Releases Redis lock `DEL project_run_lock:{project_id}`.
 14. **Frontend Delivery**: Next poll of `GET /api/runs/{run_id}` receives `status = 'COMPLETED'`. The polling timer stops, and the user clicks **"View Report"** to inspect [frontend/src/pages/ReportPage.jsx](file:///c:/dev/testpilot/frontend/src/pages/ReportPage.jsx).
 
 ```mermaid
@@ -522,7 +522,7 @@ sequenceDiagram
 
     User->>API: POST /projects/{id}/runs (Start Test Run)
     API->>DB: Check for active runs (HTTP 409 if active)
-    API->>Redis: SET run_lock:{project_id} NX EX 900
+    API->>Redis: SET project_run_lock:{project_id} NX EX 900
     API->>DB: INSERT INTO test_runs (status='QUEUED')
     API->>Redis: arq enqueue job "run_agent_job"
     API-->>User: 201 Created {id, status: "QUEUED"}
@@ -582,7 +582,7 @@ sequenceDiagram
         Graph->>DB: UPDATE test_runs (status='REPORTING')
         Graph->>Graph: generate_run_report() (math-sound metrics)
         Graph->>DB: UPDATE test_runs SET report = JSONB, status = 'COMPLETED'
-        Graph->>Redis: DEL run_lock:{project_id}
+        Graph->>Redis: DEL project_run_lock:{project_id}
     end
 
     User->>API: GET /runs/{run_id}

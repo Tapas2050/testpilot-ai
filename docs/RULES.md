@@ -58,6 +58,14 @@ Backend
 - MAX_UPLOAD_MB=10
 - ALLOWED_PRIVATE_HOSTS=localhost,127.0.0.1 (the allowlist for private-address blocking, needed for the local SupportDesk)
 
+Redis Key Names
+- Run lock key: `project_run_lock:{project_id}` (prevents duplicate concurrent runs for the same project; TTL=900s)
+- Heartbeat key: `worker_heartbeat:{run_id}` (worker liveness signal refreshed every 15s; TTL=60s)
+- Status key: `run_status:{run_id}` (cached run status and stage; TTL=1800s)
+- Progress key: `run_progress:{run_id}` (live progress counts; TTL=1800s)
+- Events key: `run_events:{run_id}` (live step events stream; TTL=1800s)
+- Cancel key: `run_cancel:{run_id}` (user cancellation flag; TTL=900s)
+
 LLM
 - GOOGLE_API_KEY
 - GOOGLE_MODEL (primary, Gemini 3.5 Flash Lite; copy the exact ID from AI Studio, see D-003)

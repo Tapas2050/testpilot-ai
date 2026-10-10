@@ -226,4 +226,43 @@ Decision:
 - Configured arq `WorkerSettings.on_startup = worker_startup` to preload the embedding model once when the worker process boots.
 Consequences: PyTorch weights loaded exactly once per worker process; eliminates redundant disk I/O and job startup latency.
 
+## D-033 MCP Subprocess CWD and Handshake Resiliency on Windows
+Status: Accepted
+Context: On Windows 11, cold startup of `@modelcontextprotocol/server-playwright` via npx took up to ~15-20 seconds. The client process lacked an explicit `cwd` parameter causing path resolution delays, and the handshake timeout was set to 15.0s, causing the cold start to time out after ~15-28s.
+Decision:
+- Added explicit `cwd=str(mcp_cwd)` pointing to repo root `node_modules` during subprocess creation.
+- Increased handshake timeout from 15.0s to 25.0s with clean stdin pipe closure to prevent `BrokenPipeError` on Windows.
+- Created standalone live smoke test `backend/scripts/smoke_browser.py` verifying MCP launch, SupportDesk `/login` navigation, screenshot capture, and clean zero-orphan process termination in ~10 seconds.
+Consequences: Playwright MCP starts cleanly on Windows 11 with 0 child process leaks.
+
+## D-034 Fast Preflight Checks Before Planning Stage
+Status: Accepted
+Context: When target URLs were down, MCP servers misconfigured, or credential encryption keys mismatched, runs consumed LLM tokens generating test plans before failing in execution with misleading BLOCKED test states.
+Decision:
+- Worker executes `run_preflight_checks()` within ~1-3s (max 10s) prior to the planning node.
+- Validates: (1) target URL reachability via SSRF-safe HTTP request, (2) Playwright MCP launch and handshake, (3) project credential decryption.
+- If preflight fails, terminates immediately as FAILED with stage `"preflight"`, action-oriented guidance for the user, and zero LLM calls or misleading BLOCKED tests.
+Consequences: Saves LLM tokens; provides immediate diagnostic feedback when dependencies or targets are offline.
+
+## D-035 Honest Terminal Run States and Failure Attribution
+Status: Accepted
+Context: Failed runs previously had their stage overwritten with the string "FAILED", stepper marked Queued as failed, and tests that never ran were shown as finished or BLOCKED with no explanation. Inner timeouts were misattributed as run deadline timeouts.
+Decision:
+- Preserved real active stage on failure in `test_runs.failed_stage` column and Redis cache.
+- Stepper marks the true failed stage in red while keeping earlier stages ticked; failed banner displays real cause and actionable hint.
+- Added monotonic deadline check (`time.monotonic() >= deadline - 0.1`) so run timeout message is raised ONLY when total duration genuinely exceeded `RUN_TIMEOUT_SECONDS`.
+- Tests that never ran due to early run failure are marked `BLOCKED` with reason `"Not executed: run stopped (<cause>)"`.
+- Progress counts only tests that actually completed execution. Added "Start a new run" button to failed run banner.
+Consequences: UI reflects exact failure stage and reason; test results clearly delineate executed vs skipped tests.
+
+## D-036 Unified Redis Operational Key Patterns and Stale Job Startup Draining
+Status: Accepted
+Context: Inconsistent lock key names (`run_lock` vs `project_run_lock`) existed across documentation, and worker startup logged individual warnings for every stale queued job.
+Decision:
+- Standardized all lock operations and documentation to `project_run_lock:{project_id}`.
+- Documented exact key patterns and manual `redis-cli del` commands for lock, heartbeat, progress, status, and event keys in `docs/MEMORY.md`, `docs/RULES.md`, and `README.md`.
+- `worker_startup` inspects the arq queue and logs a single consolidated INFO message listing the number of stale jobs skipped.
+Consequences: Accurate operator documentation and clean, uncluttered worker startup logs.
+
+
 

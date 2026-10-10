@@ -116,7 +116,7 @@ async def run_agent_job(
 
 
 async def worker_startup(ctx: dict[str, Any]) -> None:
-    """Preload process-level singleton embedding model during worker process initialization."""
+    """Preload process-level singleton embedding model and skip stale jobs at worker startup."""
     from app.services.embedder import get_embedding_model
 
     logger.info("Worker process starting up; preloading embedding model singleton...")
@@ -124,6 +124,57 @@ async def worker_startup(ctx: dict[str, Any]) -> None:
         get_embedding_model()
     except Exception as exc:
         logger.warning("Could not preload embedding model on worker startup: %s", exc)
+
+    stale_jobs_count = 0
+    redis = ctx.get("redis")
+    if redis:
+        try:
+            from arq.constants import default_queue_name, job_key_prefix
+            from arq.jobs import Job
+
+            from app.core.database import get_async_session_factory
+            from app.models.test_run import TestRun
+
+            settings = get_settings()
+            configured_db_url = str(
+                settings.TEST_DATABASE_URL
+                if (os.getenv("PYTEST_CURRENT_TEST") and settings.TEST_DATABASE_URL)
+                else settings.DATABASE_URL
+            )
+            session_factory = get_async_session_factory(configured_db_url)
+            queue_name = ctx.get("queue_name") or default_queue_name
+            job_ids = await redis.zrange(queue_name, 0, -1)
+
+            async with session_factory() as session:
+                for j_id in job_ids:
+                    str_jid = j_id if isinstance(j_id, str) else j_id.decode()
+                    job = Job(str_jid, redis, _queue_name=queue_name)
+                    info = await job.info()
+                    if not info or not info.args:
+                        await redis.zrem(queue_name, j_id)
+                        await redis.delete(job_key_prefix + str_jid)
+                        stale_jobs_count += 1
+                        continue
+
+                    raw_run_id = info.args[0]
+                    try:
+                        run_uuid = uuid.UUID(str(raw_run_id))
+                    except Exception:
+                        await redis.zrem(queue_name, j_id)
+                        await redis.delete(job_key_prefix + str_jid)
+                        stale_jobs_count += 1
+                        continue
+
+                    stmt = select(TestRun).where(TestRun.id == run_uuid)
+                    run = (await session.execute(stmt)).scalar_one_or_none()
+                    if run is None or run.status in ("COMPLETED", "FAILED", "CANCELLED"):
+                        await redis.zrem(queue_name, j_id)
+                        await redis.delete(job_key_prefix + str_jid)
+                        stale_jobs_count += 1
+        except Exception as exc:
+            logger.warning("Error inspecting stale jobs on worker startup: %s", exc)
+
+    logger.info("Worker startup: %d stale job(s) skipped", stale_jobs_count)
 
 
 class WorkerSettings:
