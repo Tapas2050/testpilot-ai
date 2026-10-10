@@ -15,6 +15,7 @@ import app.agent.executor as executor
 from app.agent.checkpointer import get_checkpointer
 from app.agent.llm import get_live_call_count
 from app.agent.mcp_client import PlaywrightMCPClient, ToolTimeoutError
+from app.agent.preflight import PreflightCheckError, run_preflight_checks
 from app.agent.state import AgentState
 from app.core.config import get_settings
 from app.core.database import get_async_session_factory
@@ -929,6 +930,25 @@ async def execute_agent_run(
         # Check if forced failure requested for testing T8.3
         if force_fail_at == "start":
             raise RuntimeError("Forced node exception during execution")
+
+        # Fast preflight checks before planning stage
+        active_stage = "preflight"
+        await update_run_in_db(run_id, status="preflight", db_url=db_url)
+        await cache_run_status(run_id, status="preflight", stage="preflight")
+
+        try:
+            await run_preflight_checks(
+                project_id=project_id,
+                db_url=db_url,
+            )
+        except PreflightCheckError as p_exc:
+            exit_status = "FAILED"
+            err_msg = format_run_failure_message(
+                stage="preflight",
+                exc=p_exc,
+            )
+            logger.error("[run_id=%s] %s", run_id, err_msg)
+            return
 
         async def _stream_graph():
             nonlocal active_stage

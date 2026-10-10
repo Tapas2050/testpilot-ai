@@ -179,3 +179,12 @@ async def auth_headers(
     user = (await db_session.execute(user_stmt)).scalar_one()
 
     return headers, user.id, proj_id
+
+
+@pytest.fixture(autouse=True)
+def mock_preflight_target_reachable(monkeypatch):
+    """By default in unit tests, assume target URL is reachable unless test explicitly overrides."""
+    async def _dummy_reachable(url: str, timeout: float = 5.0) -> None:
+        return None
+
+    monkeypatch.setattr("app.agent.preflight.check_target_url_reachable", _dummy_reachable)
