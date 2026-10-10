@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = Field("", description="OpenRouter model")
     LLM_MAX_RETRIES: int = Field(3, description="Max LLM retry attempts")
     LLM_REQUESTS_PER_MINUTE: int = Field(12, description="Rate limit requests per minute")
+    LLM_REQUEST_TIMEOUT_SECONDS: float = Field(
+        60.0, description="Per-request timeout for LLM calls in seconds"
+    )
 
     # Embeddings
     EMBEDDING_MODEL: str = Field(

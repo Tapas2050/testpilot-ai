@@ -282,7 +282,29 @@ Decide the next browser action to execute the test scenario, or finish if the re
 
                 await enforce_rate_limit()
                 llm = get_llm(temperature=0.0, structured_schema=ExecutorAction)
-                decision: Any = await llm.ainvoke(messages)
+                try:
+                    decision = await llm.ainvoke(messages)
+                except Exception as llm_exc:
+                    logger.error(
+                        "[run_id=%s] All LLM providers failed in test '%s': %s",
+                        run_id,
+                        test_case.title,
+                        llm_exc,
+                    )
+                    error_message = f"All LLM providers failed: {llm_exc}"
+                    status = "BLOCKED"
+                    llm_fail_step = {
+                        "step": step_num,
+                        "action": "llm_decision",
+                        "status": "BLOCKED",
+                        "observation": error_message,
+                    }
+                    steps_taken.append(llm_fail_step)
+                    clean_llm_step = sanitize_steps([llm_fail_step], secrets_to_redact)[0]
+                    await append_live_step_event(run_id, clean_llm_step)
+                    await update_live_progress(run_id, current_step=step_num)
+                    break
+
                 if not isinstance(decision, ExecutorAction):
                     decision = ExecutorAction(
                         thought="Mock execution finish",

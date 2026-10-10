@@ -165,6 +165,9 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
     consecutive_auth_failures = 0
     last_failed_role = ""
     auth_aborted = False
+    consecutive_llm_failures = 0
+    last_llm_error = ""
+    llm_aborted = False
     abort_message = ""
 
     session_factory = get_async_session_factory(db_url)
@@ -339,6 +342,45 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                 else:
                     consecutive_auth_failures = 0
 
+                is_llm_failure = (
+                    result.status == "BLOCKED"
+                    and (
+                        "All LLM providers failed" in (result.error_message or "")
+                        or "LLM provider failure" in (result.error_message or "")
+                    )
+                )
+                if is_llm_failure:
+                    consecutive_llm_failures += 1
+                    last_llm_error = result.error_message or "All LLM providers failed"
+                    llm_failure_entry = {
+                        "test_case_id": str(tc.id),
+                        "title": tc.title,
+                        "source_requirement": tc.source_requirement,
+                        "classification": "ENVIRONMENT_FAILURE",
+                        "severity": "HIGH",
+                        "confidence": 1.0,
+                        "expected": "LLM provider responds with valid test step decision",
+                        "observed": result.error_message or "All LLM providers failed",
+                        "explanation": (
+                            f"All LLM providers failed on '{tc.title}': {result.error_message}"
+                        ),
+                        "suggested_action": "Check LLM API keys, quotas, or provider status.",
+                    }
+                    auth_failures.append(llm_failure_entry)
+                    db_failure = Failure(
+                        test_case_id=tc.id,
+                        classification="ENVIRONMENT_FAILURE",
+                        severity="HIGH",
+                        confidence=1.0,
+                        expected=llm_failure_entry["expected"],
+                        observed=llm_failure_entry["observed"],
+                        explanation=llm_failure_entry["explanation"],
+                        suggested_action=llm_failure_entry["suggested_action"],
+                    )
+                    session.add(db_failure)
+                else:
+                    consecutive_llm_failures = 0
+
                 await session.commit()
                 await update_live_progress(
                     run_id,
@@ -373,6 +415,33 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                     await session.commit()
                     break
 
+                # Stop early if two consecutive tests fail due to LLM provider failures
+                if consecutive_llm_failures >= 2:
+                    llm_aborted = True
+                    abort_message = (
+                        f"All LLM providers failed on consecutive tests ({last_llm_error}). "
+                        "Please check LLM API keys, daily quotas, or provider service status."
+                    )
+                    # Mark remaining tests BLOCKED
+                    for remaining_tc in tcs[tc_idx + 1:]:
+                        remaining_tc.status = "BLOCKED"
+                        session.add(remaining_tc)
+                        blocked_res = TestResult(
+                            test_case_id=remaining_tc.id,
+                            status="BLOCKED",
+                            error_message=(
+                                "Blocked: Run stopped early due to repeated "
+                                f"LLM provider failures ({abort_message})"
+                            ),
+                        )
+                        session.add(blocked_res)
+                        results.append({
+                            "test_case_id": str(remaining_tc.id),
+                            "status": "BLOCKED",
+                        })
+                    await session.commit()
+                    break
+
         finally:
             await mcp_client.close()
 
@@ -382,6 +451,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
         "results": results,
         "failures": auth_failures,
         "auth_aborted": auth_aborted,
+        "llm_aborted": llm_aborted,
         "abort_message": abort_message,
     }
 
@@ -529,15 +599,15 @@ async def complete_node(state: AgentState) -> dict[str, Any]:
 
     results = state.get("results", [])
     auth_aborted = state.get("auth_aborted", False)
-    all_blocked_auth = bool(results) and all(
+    llm_aborted = state.get("llm_aborted", False)
+    all_blocked = bool(results) and all(
         r.get("status") == "BLOCKED" for r in results
     )
 
-    if auth_aborted or all_blocked_auth:
+    if auth_aborted or llm_aborted or all_blocked:
         status = "FAILED"
         err_msg = state.get("abort_message") or (
-            "Authentication failed for all executed tests. "
-            "Please check the project's saved credentials in Project Settings."
+            "Authentication or LLM provider failure for all executed tests."
         )
         logger.info("[run_id=%s] Stage changed to %s (error=%s)", run_id, status, err_msg)
         await update_run_in_db(

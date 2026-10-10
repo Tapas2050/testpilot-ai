@@ -62,6 +62,89 @@ async def enforce_rate_limit() -> None:
     _live_call_count += 1
 
 
+class AllProvidersFailedError(RuntimeError):
+    """Raised when primary LLM and all configured fallback providers fail."""
+
+    def __init__(self, message: str, original_error: Optional[Exception] = None):
+        super().__init__(message)
+        self.original_error = original_error
+
+
+def is_daily_quota_error(exc: Any) -> bool:
+    """Return True if exception or response indicates daily quota exhaustion."""
+    if exc is None:
+        return False
+    msg = str(exc).lower()
+    daily_markers = (
+        "per day",
+        "per_day",
+        "per-day",
+        "daily",
+        "daily_quota",
+        "queries per day",
+        "requests per day",
+        "insufficient_quota",
+        "free_tier_limit",
+    )
+    if any(m in msg for m in daily_markers):
+        return True
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    if (code == 429 or "429" in msg) and ("quota" in msg or "resource_exhausted" in msg):
+        if not ("per minute" in msg or "rpm" in msg or "requests per minute" in msg):
+            return True
+    return False
+
+
+# Patch google.genai retry handler to skip retrying on daily-quota exhaustion
+try:
+    from google.genai import _api_client
+    _orig_retry_args = _api_client.retry_args
+
+    def _patched_retry_args(options: Any) -> Any:
+        res = _orig_retry_args(options)
+        orig_retry = res.get("retry")
+        if orig_retry is not None:
+            def _should_retry_predicate(retry_state: Any) -> bool:
+                if retry_state and retry_state.outcome:
+                    exc = retry_state.outcome.exception()
+                    if exc is not None and is_daily_quota_error(exc):
+                        logger.warning(
+                            "Daily quota exhausted for Gemini (%s); skipping retries immediately",
+                            exc,
+                        )
+                        return False
+                return orig_retry(retry_state)
+            res["retry"] = _should_retry_predicate
+        return res
+
+    _api_client.retry_args = _patched_retry_args
+except Exception as _patch_err:
+    logger.debug("Could not patch google.genai retry args: %s", _patch_err)
+
+# Patch openai retry handler to skip retrying on daily-quota / credit exhaustion
+try:
+    from openai._base_client import BaseClient
+    _orig_should_retry = BaseClient._should_retry
+
+    def _patched_should_retry(self: Any, response: Any) -> bool:
+        if getattr(response, "status_code", None) == 429:
+            try:
+                body = response.text.lower()
+                quota_markers = ("per day", "per-day", "per_day", "daily", "insufficient_quota")
+                if any(m in body for m in quota_markers):
+                    logger.warning(
+                        "Daily quota exhausted for OpenRouter; skipping retries immediately"
+                    )
+                    return False
+            except Exception:
+                pass
+        return _orig_should_retry(self, response)
+
+    BaseClient._should_retry = _patched_should_retry
+except Exception as _patch_err:
+    logger.debug("Could not patch openai should_retry: %s", _patch_err)
+
+
 def _model_supports_temperature(model_name: str) -> bool:
     """Return False if model is known to ignore temperature (e.g. gemini-3.5-flash-lite)."""
     m = model_name.lower()
@@ -76,6 +159,7 @@ def get_primary_llm(temperature: float = 0.0) -> BaseChatModel:
         "model": model_name,
         "google_api_key": settings.GOOGLE_API_KEY,
         "max_retries": settings.LLM_MAX_RETRIES,
+        "timeout": settings.LLM_REQUEST_TIMEOUT_SECONDS,
     }
     if _model_supports_temperature(model_name):
         kwargs["temperature"] = temperature
@@ -92,6 +176,7 @@ def get_fallback_google_llm(temperature: float = 0.0) -> Optional[BaseChatModel]
         "model": model_name,
         "google_api_key": settings.GOOGLE_API_KEY,
         "max_retries": settings.LLM_MAX_RETRIES,
+        "timeout": settings.LLM_REQUEST_TIMEOUT_SECONDS,
     }
     if _model_supports_temperature(model_name):
         kwargs["temperature"] = temperature
@@ -109,6 +194,7 @@ def get_openrouter_llm(temperature: float = 0.0) -> Optional[BaseChatModel]:
         base_url="https://openrouter.ai/api/v1",
         temperature=temperature,
         max_retries=settings.LLM_MAX_RETRIES,
+        request_timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
     )
 
 

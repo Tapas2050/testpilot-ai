@@ -104,7 +104,7 @@ async def test_test_timeout_stops_hanging_tool_and_continues(db_session):
         return TestResult(test_case_id=test_case.id, status="PASSED")
 
     with (
-        patch("app.agent.graph.execute_single_test_case", side_effect=mock_execute_single),
+        patch("app.agent.graph.executor.execute_single_test_case", side_effect=mock_execute_single),
         patch("app.agent.graph.get_settings") as mock_settings,
     ):
         mock_settings.return_value.TEST_TIMEOUT_SECONDS = 0.5
