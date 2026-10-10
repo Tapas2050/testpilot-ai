@@ -128,3 +128,10 @@ Status: Accepted
 Context: D-008 and Task 10.1 require launching the pinned Playwright MCP server over stdio from Python. On Windows, executing npx.cmd dynamically inside async subprocess pipes can lead to interactive prompt deadlocks or network download overhead during test executions.
 Decision: Pin `@executeautomation/playwright-mcp-server@1.0.12` in `mcp/package.json` and execute its entrypoint directly with Node over stdio via `PlaywrightMCPClient`. Default to fast mock MCP client during automated Pytest runs unless marked for live evaluation.
 Consequences: Deterministic, offline-capable execution of Playwright MCP over stdio with zero download latency and no batch-script subprocess deadlocks.
+
+## D-023 Live Execution Events and Progress in Redis
+Status: Accepted
+Context: During a test run, the frontend needs to display real-time stage progress, current executing test, step count, and a live activity feed without overwhelming the primary PostgreSQL database with high-frequency writes for every browser action step.
+Decision: Store live step events and execution progress transiently in Redis (`run_events:{run_id}` and `run_progress:{run_id}`). Events are pushed via `rpush`, capped with `ltrim` to the last 100 events, and set with an automatic 24-hour expiration (`expire 86400`). Credentials are redacted in memory prior to pushing. Polling `GET /runs/{id}` returns the aggregated live progress and recent events from Redis during active execution, while persistent final test results and screenshots continue to be committed to PostgreSQL upon step/test conclusion.
+Consequences: Zero database migration required; near-zero latency for live activity polling; automatic cleanup via Redis TTL; complete isolation from historical report storage.
+

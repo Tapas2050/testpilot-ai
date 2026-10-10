@@ -13,6 +13,7 @@ from app.agent.llm import enforce_rate_limit, get_llm
 from app.agent.mcp_client import PlaywrightMCPClient
 from app.core.config import get_settings
 from app.models.test_run import TestCase, TestResult
+from app.services.run_service import append_live_step_event, update_live_progress
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,8 @@ async def execute_single_test_case(
     error_message: Optional[str] = None
     step_num = 1
 
+    await update_live_progress(run_id, current_test=test_case.title, current_step=0)
+
     try:
         # Perform role login if role is specified and credentials exist
         target_role = (test_case.target_role or "").lower()
@@ -154,7 +157,11 @@ async def execute_single_test_case(
                 password=cred["password"],
                 role=target_role,
             )
+            login_step["test_key"] = getattr(test_case, "test_key", "")
             steps_taken.append(login_step)
+            clean_login = sanitize_steps([login_step], secrets_to_redact)[0]
+            await append_live_step_event(run_id, clean_login)
+            await update_live_progress(run_id, current_step=1)
             step_num += 1
 
         # Execution loop
@@ -218,13 +225,17 @@ Decide the next browser action to execute the test scenario, or finish if the re
             # 3. Handle decision
             if decision.action == "finish":
                 status = decision.final_status or "PASSED"
-                steps_taken.append({
+                finish_step = {
                     "step": step_num,
                     "action": "finish",
                     "status": status,
                     "thought": decision.thought,
                     "observation": decision.observation or "Test completed",
-                })
+                }
+                steps_taken.append(finish_step)
+                clean_finish = sanitize_steps([finish_step], secrets_to_redact)[0]
+                await append_live_step_event(run_id, clean_finish)
+                await update_live_progress(run_id, current_step=step_num)
                 break
 
             step_entry = {
@@ -276,6 +287,9 @@ Decide the next browser action to execute the test scenario, or finish if the re
                 step_entry["key"] = key
 
             steps_taken.append(step_entry)
+            clean_step = sanitize_steps([step_entry], secrets_to_redact)[0]
+            await append_live_step_event(run_id, clean_step)
+            await update_live_progress(run_id, current_step=step_num)
             step_num += 1
 
         else:

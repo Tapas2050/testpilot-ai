@@ -1,10 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useRunStatus } from '../hooks/useRunStatus';
 import { StageStepper } from '../components/StageStepper';
 import { Banner } from '../components/Banner';
 import { ScreenshotViewer } from '../components/ScreenshotViewer';
 import { getStatusStyle } from '../utils/statusStyles';
+
+const ACTION_BADGES = {
+  click: { bg: '#E0F2FE', text: '#0369A1' },
+  fill: { bg: '#FEF3C7', text: '#B45309' },
+  navigate: { bg: '#F3E8FF', text: '#6B21A8' },
+  press_key: { bg: '#EDE9FE', text: '#5B21B6' },
+  select: { bg: '#CCFBF1', text: '#0F766E' },
+  finish: { bg: '#DCFCE7', text: '#15803D' },
+  login: { bg: '#FEE2E2', text: '#B91C1C' },
+};
+
+function getActionBadgeStyle(action) {
+  const key = (action || '').toLowerCase();
+  return ACTION_BADGES[key] || { bg: '#F1F5F9', text: '#475569' };
+}
 
 export function TestRunPage() {
   const { id: runId } = useParams();
@@ -22,12 +37,49 @@ export function TestRunPage() {
   } = useRunStatus(runId);
 
   const [expandedTestIds, setExpandedTestIds] = useState({});
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const feedEndRef = useRef(null);
+
+  // Elapsed-time counter
+  useEffect(() => {
+    if (!run?.started_at) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const startTime = new Date(run.started_at).getTime();
+
+    const updateElapsed = () => {
+      const endTime = run.completed_at ? new Date(run.completed_at).getTime() : Date.now();
+      const secs = Math.max(0, Math.floor((endTime - startTime) / 1000));
+      setElapsedSeconds(secs);
+    };
+
+    updateElapsed();
+    if (isTerminal) return;
+
+    const interval = setInterval(updateElapsed, 1000);
+    return () => clearInterval(interval);
+  }, [run?.started_at, run?.completed_at, isTerminal]);
+
+  // Auto-scroll feed on new events
+  const recentEvents = useMemo(() => run?.recent_events || [], [run?.recent_events]);
+  useEffect(() => {
+    if (feedEndRef.current) {
+      feedEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [recentEvents.length]);
 
   const toggleExpand = (testId) => {
     setExpandedTestIds((prev) => ({
       ...prev,
       [testId]: !prev[testId],
     }));
+  };
+
+  const formatDuration = (secs) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
   if (loading && !run) {
@@ -54,12 +106,32 @@ export function TestRunPage() {
     return acc;
   }, {});
 
-  const totalTests = testCases.length;
-  const completedTests = results.length;
-  const passCount = results.filter((r) => r.status === 'PASSED').length;
-  const failCount = results.filter((r) => r.status === 'FAILED').length;
+  const totalTests = run?.total_tests || testCases.length || 0;
+  const completedTests = run?.completed_tests ?? results.length ?? 0;
+  const passCount = run?.passed_tests ?? results.filter((r) => r.status === 'PASSED').length;
+  const failCount = run?.failed_tests ?? results.filter((r) => r.status === 'FAILED').length;
+  const progressPercent = totalTests > 0 ? Math.min(100, Math.round((completedTests / totalTests) * 100)) : 0;
 
+  const currentStage = run?.current_stage || run?.agent_stage || (run?.status === 'COMPLETED' ? 'COMPLETED' : 'QUEUED');
   const statusStyle = getStatusStyle(run?.status);
+
+  // Friendly state message when in early stages
+  let friendlyStateMessage = null;
+  if (!isTerminal) {
+    if (currentStage === 'QUEUED') {
+      friendlyStateMessage = 'Queued: Waiting for worker to start test run...';
+    } else if (currentStage === 'PLANNING') {
+      friendlyStateMessage = 'Planning tests from your requirements...';
+    } else if (currentStage === 'EXECUTING') {
+      if (recentEvents.length === 0) {
+        friendlyStateMessage = 'Starting the browser and setting up test session...';
+      }
+    } else if (currentStage === 'ANALYZING') {
+      friendlyStateMessage = 'Analyzing test execution results and diagnosing failures...';
+    } else if (currentStage === 'REPORTING') {
+      friendlyStateMessage = 'Compiling test metrics and generating final report...';
+    }
+  }
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#FFFFFF', color: '#0F172A', paddingBottom: '60px' }}>
@@ -123,8 +195,9 @@ export function TestRunPage() {
               </span>
             </div>
             <p style={{ margin: '6px 0 0', color: '#64748B', fontSize: '14px' }}>
-              Stage: <strong>{run?.agent_stage || 'INITIALIZING'}</strong>
+              Stage: <strong>{currentStage}</strong>
               {totalTests > 0 && ` • Progress: ${completedTests}/${totalTests} tests`}
+              {run?.started_at && ` • Elapsed: ${formatDuration(elapsedSeconds)}`}
             </p>
           </div>
 
@@ -143,6 +216,7 @@ export function TestRunPage() {
                   fontSize: '14px',
                   fontWeight: 500,
                   cursor: cancelling ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s ease',
                 }}
               >
                 {cancelling ? 'Cancelling...' : 'Cancel Run'}
@@ -154,7 +228,7 @@ export function TestRunPage() {
                 type="button"
                 onClick={() => navigate(`/runs/${runId}/report`)}
                 style={{
-                  padding: '8px 18px',
+                  padding: '10px 20px',
                   borderRadius: '6px',
                   border: 'none',
                   backgroundColor: '#4F46E5',
@@ -162,10 +236,11 @@ export function TestRunPage() {
                   fontSize: '14px',
                   fontWeight: 600,
                   cursor: 'pointer',
-                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                  boxShadow: '0 2px 4px 0 rgba(79, 70, 229, 0.2)',
+                  transition: 'background-color 0.15s ease',
                 }}
               >
-                View Full Report →
+                View Report →
               </button>
             )}
           </div>
@@ -173,25 +248,236 @@ export function TestRunPage() {
 
         {/* Banners */}
         {run?.status === 'FAILED' && (
-          <Banner
-            type="error"
-            title="Test Run Failed"
-            message={`Execution stopped during stage ${run?.agent_stage || 'UNKNOWN'}: ${run?.error_message || 'An unexpected execution error occurred.'}`}
-          />
+          <div style={{ marginBottom: '24px' }}>
+            <Banner
+              type="error"
+              title="Test Run Failed"
+              message={`Execution stopped during stage ${currentStage}: ${run?.error_message || 'An unexpected execution error occurred.'}`}
+            />
+          </div>
         )}
 
         {run?.status === 'CANCELLED' && (
-          <Banner
-            type="neutral"
-            title="Test Run Cancelled"
-            message="This test run was cancelled by the user. Partial results captured prior to cancellation are displayed below."
-          />
+          <div style={{ marginBottom: '24px' }}>
+            <Banner
+              type="neutral"
+              title="Test Run Cancelled"
+              message="This test run was cancelled by the user. Partial results captured prior to cancellation are displayed below."
+            />
+          </div>
         )}
 
         {/* Stage Stepper */}
-        <StageStepper currentStage={run?.agent_stage} runStatus={run?.status} />
+        <StageStepper currentStage={currentStage} runStatus={run?.status} />
 
-        {/* Live Progress Summary */}
+        {/* Overall Progress Bar & Elapsed Time */}
+        {totalTests > 0 && (
+          <div
+            style={{
+              marginBottom: '24px',
+              padding: '18px 20px',
+              backgroundColor: '#F8FAFC',
+              border: '1px solid #E2E8F0',
+              borderRadius: '8px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '10px',
+                fontSize: '14px',
+              }}
+            >
+              <div style={{ fontWeight: 600, color: '#0F172A' }}>
+                Overall Progress: {completedTests} of {totalTests} tests ({progressPercent}%)
+              </div>
+              <div style={{ color: '#64748B', fontFamily: 'monospace', fontWeight: 600 }}>
+                Elapsed: {formatDuration(elapsedSeconds)}
+              </div>
+            </div>
+            <div
+              style={{
+                width: '100%',
+                height: '8px',
+                backgroundColor: '#E2E8F0',
+                borderRadius: '4px',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  width: `${progressPercent}%`,
+                  height: '100%',
+                  backgroundColor: '#4F46E5',
+                  transition: 'width 0.4s ease',
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Friendly State Callout (when active and waiting for stage progress) */}
+        {friendlyStateMessage && (
+          <div
+            style={{
+              padding: '16px 20px',
+              backgroundColor: '#EFF6FF',
+              border: '1px solid #BFDBFE',
+              borderRadius: '8px',
+              marginBottom: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              color: '#1E40AF',
+              fontSize: '14px',
+              fontWeight: 500,
+            }}
+          >
+            <div
+              style={{
+                width: '10px',
+                height: '10px',
+                borderRadius: '50%',
+                backgroundColor: '#2563EB',
+                animation: 'pulse 1.5s infinite',
+              }}
+            />
+            <span>{friendlyStateMessage}</span>
+          </div>
+        )}
+
+        {/* Live Activity Feed for Currently Running Test */}
+        {!isTerminal && (
+          <div
+            style={{
+              marginBottom: '28px',
+              border: '1px solid #E2E8F0',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              backgroundColor: '#FFFFFF',
+            }}
+          >
+            <div
+              style={{
+                padding: '14px 20px',
+                backgroundColor: '#0F172A',
+                color: '#FFFFFF',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    backgroundColor: '#22C55E',
+                    display: 'inline-block',
+                  }}
+                />
+                <span style={{ fontWeight: 600, fontSize: '14px' }}>Live Activity Feed</span>
+                {run?.current_test && (
+                  <span style={{ fontSize: '13px', color: '#94A3B8' }}>
+                    — {run.current_test} (Step {run.current_step || 1})
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: '12px', color: '#64748B' }}>
+                {recentEvents.length} event{recentEvents.length === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            <div
+              style={{
+                padding: '16px 20px',
+                maxHeight: '260px',
+                overflowY: 'auto',
+                backgroundColor: '#F8FAFC',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+              }}
+            >
+              {recentEvents.length === 0 ? (
+                <div style={{ color: '#64748B', fontSize: '13px', fontStyle: 'italic', textAlign: 'center', padding: '16px 0' }}>
+                  {friendlyStateMessage || 'Waiting for browser action events...'}
+                </div>
+              ) : (
+                recentEvents.map((ev, idx) => {
+                  const badgeStyle = getActionBadgeStyle(ev.action);
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: '10px 14px',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #E2E8F0',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '12px',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          color: '#64748B',
+                          fontFamily: 'monospace',
+                          minWidth: '55px',
+                        }}
+                      >
+                        Step {ev.step || idx + 1}
+                      </span>
+                      <span
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          backgroundColor: badgeStyle.bg,
+                          color: badgeStyle.text,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {ev.action || 'ACTION'}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {ev.selector && (
+                          <span style={{ fontFamily: 'monospace', color: '#0F172A', fontWeight: 500 }}>
+                            {ev.selector}{' '}
+                          </span>
+                        )}
+                        {ev.url && (
+                          <span style={{ color: '#2563EB', textDecoration: 'underline' }}>
+                            {ev.url}{' '}
+                          </span>
+                        )}
+                        {ev.observation && (
+                          <span style={{ color: '#475569' }}>
+                            — {ev.observation}
+                          </span>
+                        )}
+                        {ev.thought && !ev.observation && (
+                          <span style={{ color: '#64748B', fontStyle: 'italic' }}>
+                            ({ev.thought})
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={feedEndRef} />
+            </div>
+          </div>
+        )}
+
+        {/* Live Counts Summary */}
         {totalTests > 0 && (
           <div
             style={{
@@ -242,17 +528,19 @@ export function TestRunPage() {
 
           {testCases.length === 0 ? (
             <div style={{ padding: '36px', textAlign: 'center', color: '#64748B' }}>
-              {run?.status === 'QUEUED' || run?.agent_stage === 'PLANNING'
+              {run?.status === 'QUEUED' || currentStage === 'PLANNING'
                 ? 'Planning tests from your requirements...'
                 : 'No test scenarios recorded for this run.'}
             </div>
           ) : (
             <div>
-              {testCases.map((tc) => {
+              {testCases.map((tc, tcIdx) => {
                 const res = resultsMap[tc.id];
                 const isExpanded = !!expandedTestIds[tc.id];
 
-                const testStatusStyle = res ? getStatusStyle(res.status) : getStatusStyle('PENDING');
+                // Live status badge: Pending, Running, Passed, Failed, Blocked
+                const effectiveStatus = res ? res.status : (tc.status || 'PENDING');
+                const testStatusStyle = getStatusStyle(effectiveStatus);
                 const resultBadge = (
                   <span
                     style={{
@@ -265,13 +553,13 @@ export function TestRunPage() {
                       border: `1px solid ${testStatusStyle.border}`,
                     }}
                   >
-                    {res ? res.status : 'Pending'}
+                    {effectiveStatus}
                   </span>
                 );
 
                 return (
                   <div
-                    key={tc.id}
+                    key={tc.id || tcIdx}
                     style={{
                       borderBottom: '1px solid #E2E8F0',
                       transition: 'background-color 0.1s ease',
@@ -297,20 +585,22 @@ export function TestRunPage() {
                             color: '#4F46E5',
                           }}
                         >
-                          {tc.test_key}
+                          {tc.test_key || `TC-${tcIdx + 1}`}
                         </span>
                         <span style={{ fontSize: '14px', fontWeight: 500 }}>{tc.title}</span>
-                        <span
-                          style={{
-                            fontSize: '11px',
-                            padding: '2px 6px',
-                            backgroundColor: '#F1F5F9',
-                            color: '#475569',
-                            borderRadius: '4px',
-                          }}
-                        >
-                          {tc.priority}
-                        </span>
+                        {tc.priority && (
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              padding: '2px 6px',
+                              backgroundColor: '#F1F5F9',
+                              color: '#475569',
+                              borderRadius: '4px',
+                            }}
+                          >
+                            {tc.priority}
+                          </span>
+                        )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         {resultBadge}
@@ -331,11 +621,16 @@ export function TestRunPage() {
                       >
                         <div style={{ marginBottom: '12px' }}>
                           <strong>Source Requirement: </strong>
-                          <span style={{ color: '#4F46E5' }}>{tc.source_requirement}</span>
+                          <span style={{ color: '#4F46E5' }}>{tc.source_requirement || 'N/A'}</span>
                         </div>
                         {tc.description && (
                           <div style={{ marginBottom: '12px', color: '#475569' }}>
                             <strong>Description: </strong> {tc.description}
+                          </div>
+                        )}
+                        {tc.target_role && (
+                          <div style={{ marginBottom: '12px', color: '#475569' }}>
+                            <strong>Target Role: </strong> {tc.target_role}
                           </div>
                         )}
                         {tc.preconditions && (
@@ -343,16 +638,18 @@ export function TestRunPage() {
                             <strong>Preconditions: </strong> {tc.preconditions}
                           </div>
                         )}
-                        <div style={{ marginBottom: '12px' }}>
-                          <strong>Planned Steps:</strong>
-                          <ol style={{ margin: '6px 0 0 20px', padding: 0, color: '#334155' }}>
-                            {(Array.isArray(tc.steps) ? tc.steps : []).map((step, sIdx) => (
-                              <li key={sIdx} style={{ marginBottom: '4px' }}>
-                                {typeof step === 'string' ? step : step.action || JSON.stringify(step)}
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
+                        {tc.steps && (
+                          <div style={{ marginBottom: '12px' }}>
+                            <strong>Planned Steps:</strong>
+                            <ol style={{ margin: '6px 0 0 20px', padding: 0, color: '#334155' }}>
+                              {(Array.isArray(tc.steps) ? tc.steps : []).map((step, sIdx) => (
+                                <li key={sIdx} style={{ marginBottom: '4px' }}>
+                                  {typeof step === 'string' ? step : step.action || JSON.stringify(step)}
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        )}
 
                         {res && (
                           <div
@@ -413,7 +710,7 @@ export function TestRunPage() {
                                         key={pIdx}
                                         runId={runId}
                                         filename={filename}
-                                        caption={`Evidence ${tc.test_key}`}
+                                        caption={`Evidence ${tc.test_key || ''}`}
                                       />
                                     );
                                   })}

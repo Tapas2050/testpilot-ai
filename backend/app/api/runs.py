@@ -19,6 +19,8 @@ from app.models.user import User
 from app.services.run_service import (
     acquire_run_lock,
     get_cached_run_status,
+    get_live_progress,
+    get_live_step_events,
     release_run_lock,
     set_cancel_flag,
 )
@@ -53,6 +55,17 @@ class RunDetailResponse(BaseModel):
     cancel_requested: bool
     report: Optional[dict[str, Any]] = None
     test_cases: list[TestCaseResponse] = []
+
+    # Live progress fields
+    agent_stage: Optional[str] = None
+    current_stage: Optional[str] = None
+    current_test: Optional[str] = None
+    current_step: Optional[int] = None
+    total_tests: Optional[int] = 0
+    completed_tests: Optional[int] = 0
+    passed_tests: Optional[int] = 0
+    failed_tests: Optional[int] = 0
+    recent_events: list[dict[str, Any]] = []
 
 
 class RunSummaryResponse(BaseModel):
@@ -163,13 +176,49 @@ async def get_test_run(
             detail="Test run not found",
         )
 
-    # Check if there is an active stage in Redis cache
+    # Check if there is an active stage / progress in Redis cache
     cached = await get_cached_run_status(run_id)
-    if cached and run.status in ACTIVE_STATUSES:
-        # Cache reflects active transition
-        run.status = cached.get("status", run.status)
+    progress = await get_live_progress(run_id) or {}
+    recent_events = await get_live_step_events(run_id)
 
-    return run
+    total_tests = len(run.test_cases)
+    completed_tests = sum(
+        1 for tc in run.test_cases if tc.status in ("PASSED", "FAILED", "BLOCKED")
+    )
+    passed_tests = sum(1 for tc in run.test_cases if tc.status == "PASSED")
+    failed_tests = sum(1 for tc in run.test_cases if tc.status == "FAILED")
+
+    current_stage = (
+        progress.get("stage")
+        or (cached.get("stage") if cached else None)
+        or (run.status if run.status in ACTIVE_STATUSES else "QUEUED")
+    )
+
+    effective_status = run.status
+    if cached and run.status in ACTIVE_STATUSES:
+        effective_status = cached.get("status", run.status)
+
+    return RunDetailResponse(
+        id=run.id,
+        project_id=run.project_id,
+        status=effective_status,
+        created_at=run.created_at,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        error_message=run.error_message,
+        cancel_requested=run.cancel_requested,
+        report=run.report,
+        test_cases=run.test_cases,
+        agent_stage=current_stage,
+        current_stage=current_stage,
+        current_test=progress.get("current_test"),
+        current_step=progress.get("current_step"),
+        total_tests=progress.get("total_tests", total_tests) or total_tests,
+        completed_tests=progress.get("completed_tests", completed_tests) or completed_tests,
+        passed_tests=passed_tests,
+        failed_tests=failed_tests,
+        recent_events=recent_events,
+    )
 
 
 @router.get("/projects/{project_id}/runs", response_model=list[RunSummaryResponse])

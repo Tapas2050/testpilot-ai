@@ -109,3 +109,78 @@ async def update_run_in_db(
         async with factory() as s:
             await s.execute(update(TestRun).where(TestRun.id == run_id).values(**values))
             await s.commit()
+
+
+async def append_live_step_event(
+    run_id: uuid.UUID, event: dict[str, Any], max_events: int = 100
+) -> None:
+    """Store live step events in Redis as a capped list with an expiry."""
+    redis = get_redis_client()
+    key = f"run_events:{run_id}"
+    try:
+        await redis.rpush(key, json.dumps(event))
+        await redis.ltrim(key, -max_events, -1)
+        await redis.expire(key, 86400)
+    except Exception:
+        pass
+
+
+async def get_live_step_events(run_id: uuid.UUID, limit: int = 50) -> list[dict[str, Any]]:
+    """Retrieve the recent live step events from Redis."""
+    redis = get_redis_client()
+    key = f"run_events:{run_id}"
+    try:
+        raw_events = await redis.lrange(key, -limit, -1)
+        events = []
+        for raw in raw_events:
+            try:
+                events.append(json.loads(raw))
+            except Exception:
+                continue
+        return events
+    except Exception:
+        return []
+
+
+async def update_live_progress(
+    run_id: uuid.UUID,
+    stage: Optional[str] = None,
+    current_test: Optional[str] = None,
+    current_step: Optional[int] = None,
+    total_tests: Optional[int] = None,
+    completed_tests: Optional[int] = None,
+) -> None:
+    """Update live execution progress in Redis."""
+    redis = get_redis_client()
+    key = f"run_progress:{run_id}"
+    try:
+        raw = await redis.get(key)
+        data = json.loads(raw) if raw else {}
+        if stage is not None:
+            data["stage"] = stage
+        if current_test is not None:
+            data["current_test"] = current_test
+        if current_step is not None:
+            data["current_step"] = current_step
+        if total_tests is not None:
+            data["total_tests"] = total_tests
+        if completed_tests is not None:
+            data["completed_tests"] = completed_tests
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await redis.set(key, json.dumps(data), ex=86400)
+    except Exception:
+        pass
+
+
+async def get_live_progress(run_id: uuid.UUID) -> Optional[dict[str, Any]]:
+    """Retrieve live execution progress from Redis."""
+    redis = get_redis_client()
+    key = f"run_progress:{run_id}"
+    try:
+        raw = await redis.get(key)
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        return None
+    return None
+

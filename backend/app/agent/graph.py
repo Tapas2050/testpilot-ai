@@ -14,6 +14,7 @@ from app.services.run_service import (
     cache_run_status,
     is_cancel_flag_set,
     release_run_lock,
+    update_live_progress,
     update_run_in_db,
 )
 
@@ -40,6 +41,7 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
     stage = "PLANNING"
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
+    await update_live_progress(run_id, stage=stage, total_tests=0, completed_tests=0)
 
     # Retrieve project documents and generate test plan via Planner Agent
     session_factory = get_async_session_factory(db_url)
@@ -102,6 +104,10 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
         await session.commit()
         for db_tc in db_test_cases:
             await session.refresh(db_tc)
+
+        await update_live_progress(
+            run_id, stage="PLANNING", total_tests=len(db_test_cases), completed_tests=0
+        )
 
         test_cases = [
             {
@@ -172,6 +178,10 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
         stmt = select(TestCase).where(TestCase.run_id == run_id).order_by(TestCase.order_index)
         tcs = (await session.execute(stmt)).scalars().all()
 
+        await update_live_progress(
+            run_id, stage=stage, total_tests=len(tcs), completed_tests=0
+        )
+
         import os
         is_mock_mcp = state.get("is_mock_mcp", False) or bool(os.getenv("PYTEST_CURRENT_TEST"))
         mcp_client = PlaywrightMCPClient(is_mock=is_mock_mcp)
@@ -182,6 +192,17 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                 if await check_cancellation(state):
                     return {"cancel_requested": True, "current_stage": "CANCELLED"}
 
+                tc.status = "RUNNING"
+                session.add(tc)
+                await session.commit()
+                await update_live_progress(
+                    run_id,
+                    stage=stage,
+                    current_test=tc.title,
+                    current_step=0,
+                    completed_tests=len(results),
+                )
+
                 result = await execute_single_test_case(
                     test_case=tc,
                     target_url=target_url,
@@ -191,9 +212,15 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                     storage_dir=storage_dir,
                 )
                 tc.status = result.status
+                session.add(tc)
                 session.add(result)
                 await session.commit()
                 results.append({"test_case_id": str(tc.id), "status": result.status})
+                await update_live_progress(
+                    run_id,
+                    stage=stage,
+                    completed_tests=len(results),
+                )
 
         finally:
             await mcp_client.close()
@@ -215,6 +242,7 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
     stage = "ANALYZING"
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
+    await update_live_progress(run_id, stage=stage)
 
     from sqlalchemy import select
 
@@ -300,6 +328,7 @@ async def report_node(state: AgentState) -> dict[str, Any]:
     stage = "REPORTING"
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
+    await update_live_progress(run_id, stage=stage)
 
     from sqlalchemy import select
 
@@ -344,6 +373,7 @@ async def complete_node(state: AgentState) -> dict[str, Any]:
 
     await update_run_in_db(run_id, status=status, completed_at=now, db_url=db_url)
     await cache_run_status(run_id, status=status, stage=status)
+    await update_live_progress(run_id, stage=status)
 
     project_id = uuid.UUID(state["project_id"])
     await release_run_lock(project_id)
@@ -365,6 +395,7 @@ async def cancel_node(state: AgentState) -> dict[str, Any]:
         run_id, status=status, completed_at=now, cancel_requested=True, db_url=db_url
     )
     await cache_run_status(run_id, status=status, stage=status)
+    await update_live_progress(run_id, stage=status)
 
     project_id = uuid.UUID(state["project_id"])
     await release_run_lock(project_id)
@@ -451,5 +482,6 @@ async def execute_agent_run(
             run_id, status=status, completed_at=now, error_message=err_msg, db_url=db_url
         )
         await cache_run_status(run_id, status=status, stage=status, error=err_msg)
+        await update_live_progress(run_id, stage=status)
         await release_run_lock(project_id)
         # We catch and do not re-raise so worker task completes cleanly and API stays up
