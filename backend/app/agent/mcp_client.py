@@ -174,7 +174,7 @@ class PlaywrightMCPClient:
             if tool_name in self._mock_responses:
                 return self._mock_responses[tool_name]
             if tool_name == "playwright_get_visible_text":
-                return {"text": "Page content placeholder"}
+                return {"text": f"Page content placeholder step {len(self._called_tools)}"}
             if tool_name == "playwright_screenshot":
                 return {"status": "saved", "path": "mock_screenshot.png"}
             return {"status": "ok", "tool": tool_name}

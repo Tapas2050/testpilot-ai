@@ -19,3 +19,5 @@ class AgentState(TypedDict, total=False):
     report: Optional[dict[str, Any]]
     error: Optional[str]
     cancel_requested: bool
+    auth_aborted: bool
+    abort_message: Optional[str]

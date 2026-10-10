@@ -258,3 +258,59 @@ async def test_t8_6_checkpoint_exists_for_run_thread(client: AsyncClient, auth_h
     assert checkpoint_tuple.checkpoint is not None
     # Thread ID matches
     assert checkpoint_tuple.config["configurable"]["thread_id"] == str(run_id)
+
+
+@pytest.mark.asyncio
+async def test_part3_consecutive_login_failures_aborts_run_early_as_failed(
+    client: AsyncClient, auth_headers
+):
+    """Part 3(b, c): Two consecutive login failures stops run early as FAILED."""
+    from unittest.mock import patch
+
+    from app.agent.planner import PlanOutput, PlannedTestCase
+    from app.models.test_run import TestResult
+
+    headers, user_id, proj_id = auth_headers
+    settings = get_settings()
+
+    create_resp = await client.post(f"/projects/{proj_id}/runs", headers=headers)
+    assert create_resp.status_code == 201
+    run_id = uuid.UUID(create_resp.json()["id"])
+
+    mock_plan = PlanOutput(
+        test_cases=[
+            PlannedTestCase(
+                title=f"Test Auth Case {i}",
+                description="Testing login failure abort",
+                source_requirement=f"REQ-AUTH-{i}",
+                target_role="admin",
+            )
+            for i in range(1, 5)
+        ]
+    )
+
+    async def mock_exec_test_case(test_case, *args, **kwargs):
+        return TestResult(
+            test_case_id=test_case.id,
+            status="BLOCKED",
+            error_message="Authentication failed for role 'admin': Invalid email or password",
+        )
+
+    with patch("app.agent.planner.generate_test_plan", return_value=mock_plan), \
+         patch("app.agent.executor.execute_single_test_case", side_effect=mock_exec_test_case):
+        await execute_agent_run(
+            run_id=run_id,
+            project_id=proj_id,
+            db_url=settings.TEST_DATABASE_URL,
+        )
+
+    get_resp = await client.get(f"/runs/{run_id}", headers=headers)
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert data["status"] == "FAILED"
+    assert "Authentication failed for role 'admin'" in (data["error_message"] or "")
+    assert "saved credentials" in (data["error_message"] or "").lower()
+    assert data["report"] is not None
+    for tc in data["test_cases"]:
+        assert tc["status"] == "BLOCKED"
+

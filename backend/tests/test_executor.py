@@ -60,14 +60,20 @@ async def test_t10_2_step_budget_and_timeout_end_cleanly(tmp_path: Path):
     client = PlaywrightMCPClient(is_mock=True)
     await client.start()
 
-    # Mock LLM that keeps clicking forever without finishing
+    # Mock LLM that keeps clicking different elements without finishing
     mock_llm = MagicMock()
-    mock_action = ExecutorAction(
-        thought="Keep clicking",
-        action="click",
-        selector="#next-btn",
-    )
-    mock_llm.ainvoke = AsyncMock(return_value=mock_action)
+    call_count = 0
+
+    def mock_step(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return ExecutorAction(
+            thought=f"Keep clicking step {call_count}",
+            action="click",
+            selector=f"#next-btn-{call_count}",
+        )
+
+    mock_llm.ainvoke = AsyncMock(side_effect=mock_step)
     set_mock_llm(mock_llm)
 
     try:
@@ -261,3 +267,143 @@ async def test_t10_6_eval_live_supportdesk_execution(tmp_path: Path):
         assert ss_res is not None
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part3_mocked_failing_login_blocks_test_with_no_llm_calls(tmp_path: Path):
+    """Part 3(a): Scripted role login failure marks test BLOCKED with 0 LLM calls."""
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Admin ticket view test",
+        description="Verify admin can view tickets",
+        source_requirement="REQ-AUTH-01",
+        target_role="admin",
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+    client.set_mock_response(
+        "playwright_get_visible_text",
+        {"text": "Sign In to SupportDesk\nInvalid email or password\nEmail\nPassword"},
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock()
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={"admin": {"email": "admin@test.com", "password": "WrongPassword"}},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        assert result.status == "BLOCKED"
+        assert result.error_message is not None
+        assert "Authentication failed" in result.error_message
+        assert mock_llm.ainvoke.call_count == 0  # Zero LLM calls
+    finally:
+        set_mock_llm(None)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part3_repeating_action_detected_as_loop_fails_test(tmp_path: Path):
+    """Part 3(d): Same action on same selector with same value repeated 3 times fails test."""
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Looping action test",
+        description="Verify 3-step action repetition loop ends cleanly as FAILED",
+        source_requirement="REQ-LOOP-01",
+        target_role=None,
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+
+    mock_llm = MagicMock()
+    mock_action = ExecutorAction(
+        thought="Fill email repeatedly",
+        action="fill",
+        selector="#email",
+        value="test@example.com",
+    )
+    mock_llm.ainvoke = AsyncMock(return_value=mock_action)
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        assert result.status == "FAILED"
+        assert result.error_message is not None
+        assert "repeated 3 times in a row" in result.error_message
+        assert len(result.steps) == 3
+        # Should stop after detecting the 3rd repeat, no further calls
+        assert mock_llm.ainvoke.call_count == 3
+    finally:
+        set_mock_llm(None)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part3_unchanged_page_text_detected_as_loop_fails_test(tmp_path: Path):
+    """Part 3(d): Unchanged visible page text for 4 consecutive steps fails test."""
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Unchanged page text loop test",
+        description="Verify 4 steps of unchanged text fails as loop",
+        source_requirement="REQ-LOOP-02",
+        target_role=None,
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+    client.set_mock_response(
+        "playwright_get_visible_text",
+        {"text": "Static constant page text that never changes"},
+    )
+
+    mock_llm = MagicMock()
+    call_count = 0
+
+    def mock_step(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return ExecutorAction(
+            thought=f"Click something different {call_count}",
+            action="click",
+            selector=f"#button-{call_count}",
+        )
+
+    mock_llm.ainvoke = AsyncMock(side_effect=mock_step)
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        assert result.status == "FAILED"
+        assert result.error_message is not None
+        assert "visible page text unchanged for 4 consecutive steps" in result.error_message
+        # Should stop at step 4 without further LLM calls
+        assert mock_llm.ainvoke.call_count <= 4
+    finally:
+        set_mock_llm(None)
+        await client.close()
+

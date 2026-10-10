@@ -148,11 +148,18 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
     from app.core.security import decrypt_credential
     from app.models.credential import ProjectCredential
     from app.models.project import Project
+    from app.models.test_run import Failure, TestResult
 
     settings = get_settings()
     storage_dir = Path(settings.STORAGE_DIR)
 
     results = []
+    auth_failures: list[dict[str, Any]] = []
+    consecutive_auth_failures = 0
+    last_failed_role = ""
+    auth_aborted = False
+    abort_message = ""
+
     session_factory = get_async_session_factory(db_url)
     async with session_factory() as session:
         # 1. Fetch project target URL
@@ -188,7 +195,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
         await mcp_client.start()
 
         try:
-            for tc in tcs:
+            for tc_idx, tc in enumerate(tcs):
                 if await check_cancellation(state):
                     return {"cancel_requested": True, "current_stage": "CANCELLED"}
 
@@ -214,13 +221,77 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                 tc.status = result.status
                 session.add(tc)
                 session.add(result)
-                await session.commit()
                 results.append({"test_case_id": str(tc.id), "status": result.status})
+
+                is_auth_failure = (
+                    result.status == "BLOCKED"
+                    and "Authentication failed" in (result.error_message or "")
+                )
+                if is_auth_failure:
+                    consecutive_auth_failures += 1
+                    last_failed_role = tc.target_role or "user"
+                    auth_failure_entry = {
+                        "test_case_id": str(tc.id),
+                        "title": tc.title,
+                        "source_requirement": tc.source_requirement,
+                        "classification": "AUTHENTICATION_FAILURE",
+                        "severity": "HIGH",
+                        "confidence": 1.0,
+                        "expected": f"Successful authentication for role '{tc.target_role}'",
+                        "observed": result.error_message or "Authentication failure",
+                        "explanation": f"Scripted login for role '{tc.target_role}' failed.",
+                        "suggested_action": (
+                            "Check project's saved credentials in Project Settings."
+                        ),
+                    }
+                    auth_failures.append(auth_failure_entry)
+                    db_failure = Failure(
+                        test_case_id=tc.id,
+                        classification="AUTHENTICATION_FAILURE",
+                        severity="HIGH",
+                        confidence=1.0,
+                        expected=auth_failure_entry["expected"],
+                        observed=auth_failure_entry["observed"],
+                        explanation=auth_failure_entry["explanation"],
+                        suggested_action=auth_failure_entry["suggested_action"],
+                    )
+                    session.add(db_failure)
+                else:
+                    consecutive_auth_failures = 0
+
+                await session.commit()
                 await update_live_progress(
                     run_id,
                     stage=stage,
                     completed_tests=len(results),
                 )
+
+                # Stop early if two consecutive tests fail to log in
+                if consecutive_auth_failures >= 2:
+                    auth_aborted = True
+                    abort_message = (
+                        f"Authentication failed for role '{last_failed_role}'. "
+                        f"Please check the project's saved credentials in Project Settings."
+                    )
+                    # Mark remaining tests BLOCKED
+                    for remaining_tc in tcs[tc_idx + 1:]:
+                        remaining_tc.status = "BLOCKED"
+                        session.add(remaining_tc)
+                        blocked_res = TestResult(
+                            test_case_id=remaining_tc.id,
+                            status="BLOCKED",
+                            error_message=(
+                                "Blocked: Run stopped early due to repeated "
+                                f"authentication failures ({abort_message})"
+                            ),
+                        )
+                        session.add(blocked_res)
+                        results.append({
+                            "test_case_id": str(remaining_tc.id),
+                            "status": "BLOCKED",
+                        })
+                    await session.commit()
+                    break
 
         finally:
             await mcp_client.close()
@@ -229,6 +300,9 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
         "current_stage": "EXECUTING",
         "status": "EXECUTING",
         "results": results,
+        "failures": auth_failures,
+        "auth_aborted": auth_aborted,
+        "abort_message": abort_message,
     }
 
 
@@ -249,7 +323,7 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
     from app.agent.analyst import analyze_test_failure
     from app.models.test_run import Failure, TestResult
 
-    failures = []
+    failures = list(state.get("failures", []))
     session_factory = get_async_session_factory(db_url)
     async with session_factory() as session:
         # T11.2: Analyst runs only for failed tests
@@ -365,17 +439,44 @@ async def report_node(state: AgentState) -> dict[str, Any]:
 
 
 async def complete_node(state: AgentState) -> dict[str, Any]:
-    """Final node: Marks run as COMPLETED with timestamp."""
+    """Final node: Marks run as COMPLETED with timestamp, or FAILED if authentication blocked."""
     run_id = uuid.UUID(state["run_id"])
+    project_id = uuid.UUID(state["project_id"])
     db_url = state.get("db_url")
     now = datetime.now(timezone.utc)
-    status = "COMPLETED"
 
+    results = state.get("results", [])
+    auth_aborted = state.get("auth_aborted", False)
+    all_blocked_auth = bool(results) and all(
+        r.get("status") == "BLOCKED" for r in results
+    )
+
+    if auth_aborted or all_blocked_auth:
+        status = "FAILED"
+        err_msg = state.get("abort_message") or (
+            "Authentication failed for all executed tests. "
+            "Please check the project's saved credentials in Project Settings."
+        )
+        await update_run_in_db(
+            run_id,
+            status=status,
+            completed_at=now,
+            error_message=err_msg,
+            db_url=db_url,
+        )
+        await cache_run_status(run_id, status=status, stage=status, error=err_msg)
+        await update_live_progress(run_id, stage=status)
+        await release_run_lock(project_id)
+        return {
+            "current_stage": status,
+            "status": status,
+            "error_message": err_msg,
+        }
+
+    status = "COMPLETED"
     await update_run_in_db(run_id, status=status, completed_at=now, db_url=db_url)
     await cache_run_status(run_id, status=status, stage=status)
     await update_live_progress(run_id, stage=status)
-
-    project_id = uuid.UUID(state["project_id"])
     await release_run_lock(project_id)
 
     return {

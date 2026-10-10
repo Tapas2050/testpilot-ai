@@ -106,6 +106,28 @@ async def perform_role_login(
         "playwright_click",
         {"selector": "button[type='submit'], input[type='submit']"},
     )
+    text_res = await mcp_client.call_tool("playwright_get_visible_text", {})
+    raw_text = ""
+    if isinstance(text_res, dict):
+        raw_text = text_res.get("text", "") or str(text_res.get("content", ""))
+    lower_text = raw_text.lower()
+
+    if (
+        "invalid email or password" in lower_text
+        or "invalid credentials" in lower_text
+        or "login failed" in lower_text
+        or "authentication failed" in lower_text
+    ):
+        return {
+            "step": 1,
+            "action": "login",
+            "role": role,
+            "selector": "form",
+            "value": "[REDACTED]",
+            "status": "failed",
+            "error": "Invalid email or password",
+        }
+
     return {
         "step": 1,
         "action": "login",
@@ -164,32 +186,69 @@ async def execute_single_test_case(
             await update_live_progress(run_id, current_step=1)
             step_num += 1
 
-        # Execution loop
-        while step_num <= max_steps:
-            elapsed = time.monotonic() - start_time
-            if elapsed > timeout_seconds:
-                error_message = f"Test timeout of {timeout_seconds}s exceeded"
-                status = "FAILED"
-                break
+            if login_step.get("status") == "failed":
+                status = "BLOCKED"
+                error_message = (
+                    f"Authentication failed for role '{target_role}': "
+                    f"{login_step.get('error', 'Invalid credentials')}"
+                )
 
-            # 1. Fetch current visible page state
-            text_res = await mcp_client.call_tool("playwright_get_visible_text", {})
-            raw_text = ""
-            if isinstance(text_res, dict):
-                raw_text = text_res.get("text", "") or str(text_res.get("content", ""))
-            # Truncate page text payload to keep payload small per D-004
-            page_text = raw_text[:1000]
+        # Execution loop (only runs if test is NOT BLOCKED)
+        if status != "BLOCKED":
+            recent_actions: list[tuple[str, str, str]] = []
+            consecutive_unchanged_text = 0
+            last_page_text: Optional[str] = None
 
-            # 2. Formulate prompt for Executor LLM
-            history_desc = "\n".join(
-                f"- Step {s.get('step')}: {s.get('action')} on "
-                f"{s.get('selector', '')} -> {s.get('status', 'ok')}"
-                for s in steps_taken
-            )
-            if not history_desc:
-                history_desc = "(No previous steps)"
+            while step_num <= max_steps:
+                elapsed = time.monotonic() - start_time
+                if elapsed > timeout_seconds:
+                    error_message = f"Test timeout of {timeout_seconds}s exceeded"
+                    status = "FAILED"
+                    break
 
-            prompt_content = f"""Test Objective:
+                # 1. Fetch current visible page state
+                text_res = await mcp_client.call_tool("playwright_get_visible_text", {})
+                raw_text = ""
+                if isinstance(text_res, dict):
+                    raw_text = text_res.get("text", "") or str(text_res.get("content", ""))
+                # Truncate page text payload to keep payload small per D-004
+                page_text = raw_text[:1000]
+
+                # Loop detection: 4 consecutive steps of unchanged page text
+                if last_page_text is not None and page_text.strip() == last_page_text.strip():
+                    consecutive_unchanged_text += 1
+                else:
+                    consecutive_unchanged_text = 1
+                    last_page_text = page_text
+
+                if consecutive_unchanged_text >= 4:
+                    error_message = (
+                        "Execution loop detected: visible page text "
+                        "unchanged for 4 consecutive steps"
+                    )
+                    status = "FAILED"
+                    loop_step = {
+                        "step": step_num,
+                        "action": "loop_detected",
+                        "status": "FAILED",
+                        "observation": error_message,
+                    }
+                    steps_taken.append(loop_step)
+                    clean_loop = sanitize_steps([loop_step], secrets_to_redact)[0]
+                    await append_live_step_event(run_id, clean_loop)
+                    await update_live_progress(run_id, current_step=step_num)
+                    break
+
+                # 2. Formulate prompt for Executor LLM
+                history_desc = "\n".join(
+                    f"- Step {s.get('step')}: {s.get('action')} on "
+                    f"{s.get('selector', '')} -> {s.get('status', 'ok')}"
+                    for s in steps_taken
+                )
+                if not history_desc:
+                    history_desc = "(No previous steps)"
+
+                prompt_content = f"""Test Objective:
 Title: {test_case.title}
 Description: {test_case.description}
 Requirement: {test_case.source_requirement}
@@ -206,96 +265,128 @@ Current Browser Page State:
 
 Decide the next browser action to execute the test scenario, or finish if the result is known."""
 
-            messages = [
-                SystemMessage(content=EXECUTOR_SYSTEM_PROMPT),
-                HumanMessage(content=prompt_content),
-            ]
+                messages = [
+                    SystemMessage(content=EXECUTOR_SYSTEM_PROMPT),
+                    HumanMessage(content=prompt_content),
+                ]
 
-            await enforce_rate_limit()
-            llm = get_llm(temperature=0.0, structured_schema=ExecutorAction)
-            decision: Any = await llm.ainvoke(messages)
-            if not isinstance(decision, ExecutorAction):
-                decision = ExecutorAction(
-                    thought="Mock execution finish",
-                    action="finish",
-                    final_status="PASSED",
-                    observation="Mock test completed successfully",
+                await enforce_rate_limit()
+                llm = get_llm(temperature=0.0, structured_schema=ExecutorAction)
+                decision: Any = await llm.ainvoke(messages)
+                if not isinstance(decision, ExecutorAction):
+                    decision = ExecutorAction(
+                        thought="Mock execution finish",
+                        action="finish",
+                        final_status="PASSED",
+                        observation="Mock test completed successfully",
+                    )
+
+                # Loop detection: same action on same selector with same value 3 times in a row
+                action_key = (
+                    str(decision.action or ""),
+                    str(decision.selector or ""),
+                    str(decision.value or ""),
                 )
+                if (
+                    len(recent_actions) >= 2
+                    and recent_actions[-1] == action_key
+                    and recent_actions[-2] == action_key
+                ):
+                    error_message = (
+                        f"Execution loop detected: action '{decision.action}' on selector "
+                        f"'{decision.selector}' repeated 3 times in a row"
+                    )
+                    status = "FAILED"
+                    loop_step = {
+                        "step": step_num,
+                        "action": decision.action,
+                        "selector": decision.selector,
+                        "value": decision.value,
+                        "status": "FAILED",
+                        "observation": error_message,
+                    }
+                    steps_taken.append(loop_step)
+                    clean_loop = sanitize_steps([loop_step], secrets_to_redact)[0]
+                    await append_live_step_event(run_id, clean_loop)
+                    await update_live_progress(run_id, current_step=step_num)
+                    break
 
-            # 3. Handle decision
-            if decision.action == "finish":
-                status = decision.final_status or "PASSED"
-                finish_step = {
+                recent_actions.append(action_key)
+
+                # 3. Handle decision
+                if decision.action == "finish":
+                    status = decision.final_status or "PASSED"
+                    finish_step = {
+                        "step": step_num,
+                        "action": "finish",
+                        "status": status,
+                        "thought": decision.thought,
+                        "observation": decision.observation or "Test completed",
+                    }
+                    steps_taken.append(finish_step)
+                    clean_finish = sanitize_steps([finish_step], secrets_to_redact)[0]
+                    await append_live_step_event(run_id, clean_finish)
+                    await update_live_progress(run_id, current_step=step_num)
+                    break
+
+                step_entry = {
                     "step": step_num,
-                    "action": "finish",
-                    "status": status,
+                    "action": decision.action,
                     "thought": decision.thought,
-                    "observation": decision.observation or "Test completed",
+                    "status": "ok",
                 }
-                steps_taken.append(finish_step)
-                clean_finish = sanitize_steps([finish_step], secrets_to_redact)[0]
-                await append_live_step_event(run_id, clean_finish)
+
+                if decision.action == "navigate":
+                    dest_url = decision.url or target_url
+                    # Simple domain check to protect against SSRF redirect outside target
+                    if not dest_url.startswith(("http://", "https://", "/")):
+                        dest_url = target_url
+                    await mcp_client.call_tool(
+                        "playwright_navigate", {"url": dest_url, "headless": True}
+                    )
+                    step_entry["url"] = dest_url
+
+                elif decision.action == "click":
+                    selector = decision.selector or "button"
+                    await mcp_client.call_tool("playwright_click", {"selector": selector})
+                    step_entry["selector"] = selector
+
+                elif decision.action == "fill":
+                    selector = decision.selector or "input"
+                    val = decision.value or ""
+                    await mcp_client.call_tool(
+                        "playwright_fill", {"selector": selector, "value": val}
+                    )
+                    step_entry["selector"] = selector
+                    step_entry["value"] = val
+
+                elif decision.action == "select":
+                    selector = decision.selector or "select"
+                    val = decision.value or ""
+                    await mcp_client.call_tool(
+                        "playwright_select", {"selector": selector, "value": val}
+                    )
+                    step_entry["selector"] = selector
+                    step_entry["value"] = val
+
+                elif decision.action == "press_key":
+                    key = decision.key or "Enter"
+                    await mcp_client.call_tool(
+                        "playwright_press_key",
+                        {"key": key, "selector": decision.selector or ""},
+                    )
+                    step_entry["key"] = key
+
+                steps_taken.append(step_entry)
+                clean_step = sanitize_steps([step_entry], secrets_to_redact)[0]
+                await append_live_step_event(run_id, clean_step)
                 await update_live_progress(run_id, current_step=step_num)
-                break
+                step_num += 1
 
-            step_entry = {
-                "step": step_num,
-                "action": decision.action,
-                "thought": decision.thought,
-                "status": "ok",
-            }
-
-            if decision.action == "navigate":
-                dest_url = decision.url or target_url
-                # Simple domain check to protect against SSRF redirect outside target
-                if not dest_url.startswith(("http://", "https://", "/")):
-                    dest_url = target_url
-                await mcp_client.call_tool(
-                    "playwright_navigate", {"url": dest_url, "headless": True}
-                )
-                step_entry["url"] = dest_url
-
-            elif decision.action == "click":
-                selector = decision.selector or "button"
-                await mcp_client.call_tool("playwright_click", {"selector": selector})
-                step_entry["selector"] = selector
-
-            elif decision.action == "fill":
-                selector = decision.selector or "input"
-                val = decision.value or ""
-                await mcp_client.call_tool(
-                    "playwright_fill", {"selector": selector, "value": val}
-                )
-                step_entry["selector"] = selector
-                step_entry["value"] = val
-
-            elif decision.action == "select":
-                selector = decision.selector or "select"
-                val = decision.value or ""
-                await mcp_client.call_tool(
-                    "playwright_select", {"selector": selector, "value": val}
-                )
-                step_entry["selector"] = selector
-                step_entry["value"] = val
-
-            elif decision.action == "press_key":
-                key = decision.key or "Enter"
-                await mcp_client.call_tool(
-                    "playwright_press_key",
-                    {"key": key, "selector": decision.selector or ""},
-                )
-                step_entry["key"] = key
-
-            steps_taken.append(step_entry)
-            clean_step = sanitize_steps([step_entry], secrets_to_redact)[0]
-            await append_live_step_event(run_id, clean_step)
-            await update_live_progress(run_id, current_step=step_num)
-            step_num += 1
-
-        else:
-            # Exited while loop without 'finish'
-            error_message = f"Step budget of {max_steps} steps exceeded without conclusion"
-            status = "FAILED"
+            else:
+                # Exited while loop without 'finish'
+                error_message = f"Step budget of {max_steps} steps exceeded without conclusion"
+                status = "FAILED"
 
     except Exception as exc:
         logger.exception("Error executing test case")
