@@ -123,12 +123,11 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] 13.7 Demo rehearsal and backup recording
 - [x] 13.8 Fresh-clone setup test
 
-## Run Experience Improvements & Hardening
-- [x] Fix 1: White screen on run page resolved with shared `statusStyles.js`, neutral fallbacks, global ErrorBoundary, 404 catch-all route, and Vitest status tests
-- [x] Fix 2: Live progress screen with 6-stage animated stepper, progress bar, live elapsed timer, live activity feed, Redis transient events list, and friendly empty states
-- [x] Fix 3: Authentication fail-fast (BLOCKED on auth failure, 2-failure early run abort, all-BLOCKED run status FAILED) and executor loop detection (3 repeating actions / 4 unchanged page text states)
-- [x] Fix 4: Synchronized SupportDesk credentials from root `.env` without hardcoded fallbacks, one-command `supportdesk/reseed.py`, credential verification `backend/scripts/check_target_login.py`
-- [x] Fix 5: Default primary model `gemini-3.5-flash-lite`, rate limit 12 RPM, `RUN_TIMEOUT_SECONDS=1800`, Redis duplicate lock TTL aligned, worker INFO logs with `[run_id=...]`, live LLM calls tracking at run completion, and temperature warning suppression
-
-## Blocked / Deferred
-- Document upload and embedding loading pipeline optimization (deferred to a separate pass per user instructions)
+## Worker Timeout, Stuck-Run, and Cleanup Hardening
+- [x] Part 1: arq worker timeout set to `RUN_TIMEOUT_SECONDS + 300` (2100s), single try `max_tries = 1`, `retry_jobs = False`, and in-job graceful timeout via `asyncio.wait_for` (D-026)
+- [x] Part 2: Shielded run finalization `_finalize_run` on ANY exit setting status to FAILED/CANCELLED with descriptive error, marking unfinished tests BLOCKED, creating partial report, releasing Redis lock, clearing progress keys, closing MCP process (D-027)
+- [x] Part 3: Per-tool non-blocking timeouts (45s nav, 30s actions/screenshots), Windows process tree termination via `taskkill /F /T /PID` (and POSIX SIGKILL), MCP restart on timeout, tests marked FAILED with ENVIRONMENT_FAILURE, clean teardown of child processes (D-028)
+- [x] Part 4: Redis worker heartbeats (`worker_heartbeat:{run_id}`, TTL=60s, 15s refresh), dead worker detection (>90s without heartbeat marked FAILED with "Worker stopped responding") in GET /runs/{id} and startup sweep, frontend timer stopped on terminal states (D-029)
+- [x] Part 5: Queue isolation with `TEST_REDIS_URL` in DB 1, `run_id` only payload, worker uses configured `DATABASE_URL` instead of job payload, missing run skipped cleanly with single short warning (D-030)
+- [x] Part 6: LLM per-request timeout (`LLM_REQUEST_TIMEOUT_SECONDS=60.0`), fast daily-quota 429 fallback bypassing retry loops, test marked BLOCKED with ENVIRONMENT_FAILURE on provider failure, run aborted early on 2 consecutive provider failures (D-031)
+- [x] Part 7: Embedding model singleton in `_process_model_cache` loaded once per worker process, preloaded on worker startup in `WorkerSettings.on_startup` (D-032)

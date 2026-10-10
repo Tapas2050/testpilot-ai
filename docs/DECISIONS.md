@@ -165,6 +165,65 @@ Decision:
 - Configure `WorkerSettings.max_tries = 1` and `WorkerSettings.retry_jobs = False`. An AI agent test run has non-idempotent side effects across browser sessions, target databases, and user reports; runs must never be silently re-executed from scratch on failure or cancellation.
 - Enforce `RUN_TIMEOUT_SECONDS` (default 1800s) gracefully inside the job (`execute_agent_run` and `run_agent_job`) using `asyncio.wait_for`. When the in-job limit is reached, an in-job `asyncio.TimeoutError` triggers graceful cleanup: updating the run to FAILED with error message `"Run exceeded the time limit of N seconds"`, marking remaining tests BLOCKED, releasing Redis locks, and closing MCP processes.
 - The 300-second delta (`job_timeout` minus `RUN_TIMEOUT_SECONDS`) guarantees that arq's hard process-level kill is strictly a last resort if graceful finalization hangs.
-Consequences: Prevents premature 5-minute worker kills; guarantees graceful finalization before hard timeouts; eliminates duplicated re-execution of failed runs.
+
+## D-027 Guaranteed Shielded Run Finalization on Any Exit
+Status: Accepted
+Context: If a worker was cancelled, encountered an unhandled exception, or timed out, the run remained stuck in EXECUTING, test results were lost, the Redis duplicate-run lock remained forever, and headless Chromium/node MCP subprocesses were orphaned.
+Decision: Wrap agent run execution in `_finalize_run(run_id, project_id, ...)` protected by `asyncio.shield` so finalization cannot be aborted by cancellation. On any non-completed exit, finalization:
+- Updates run status to FAILED (or CANCELLED if user-initiated) with an explicit, human-readable error message.
+- Marks any unfinished/running test cases as BLOCKED.
+- Assembles and persists a partial mathematical report based on tests completed so far.
+- Releases the project Redis run lock (`lock:run:{project_id}`).
+- Clears live progress keys (`run_events:{run_id}` and `run_progress:{run_id}`).
+- Gracefully terminates and closes any active Playwright MCP client and browser process.
+Consequences: Runs never remain stuck in EXECUTING; orphaned locks are eliminated; partial test evidence is preserved.
+
+## D-028 Per-Tool MCP Timeouts and Windows Process Tree Termination
+Status: Accepted
+Context: Blocking MCP tool calls executed via `asyncio.to_thread` could hang indefinitely when the target application lagged or deadlocked, because thread blocking cannot be stopped by asyncio cancellation.
+Decision:
+- Enforce per-tool non-blocking timeouts: navigation 45s, screenshots 30s, other browser actions 30s (all configurable).
+- On timeout, immediately terminate the entire MCP child process tree using `taskkill /F /T /PID` on Windows and `SIGKILL` process-group termination on POSIX.
+- Automatically restart the MCP client for the next test.
+- Classify timed-out tests as FAILED with `ENVIRONMENT_FAILURE` and proceed to subsequent tests.
+- Close and terminate all MCP processes on worker teardown.
+Consequences: Stuck browser interactions cannot hang tests or runs; zero orphaned node/Chromium processes left behind.
+
+## D-029 Redis Worker Heartbeats and Dead Run Auto-Detection
+Status: Accepted
+Context: If a worker process crashed, was SIGKILL'ed, or lost power, the database maintained active status (EXECUTING/PLANNING) indefinitely, while the frontend timer ran indefinitely.
+Decision:
+- Workers refresh a Redis heartbeat key `worker_heartbeat:{run_id}` with TTL=60s every 15 seconds during active execution.
+- `GET /runs/{id}` and an application startup sweep check active runs: if older than 90s and missing a heartbeat key, the run is immediately marked FAILED with `"Worker stopped responding"`, the lock is released, and keys cleared.
+- The frontend `TestRunPage.jsx` stops the elapsed timer at any terminal state (COMPLETED, FAILED, CANCELLED) and displays a clear failure banner.
+Consequences: UI never displays dead workers as active; stale runs self-heal immediately on access or restart.
+
+## D-030 Test Redis Isolation and Worker Database Independence
+Status: Accepted
+Context: Automated test runs previously enqueued jobs into the production Redis DB 0 carrying the test database URL (`testpilot_test`). After pytest finished and truncated test tables, external workers picked up the job and crashed with `relation "test_runs" does not exist` or masked password errors.
+Decision:
+- Added `TEST_REDIS_URL` in `.env.example` and `config.py` pointing to Redis DB 1 (`redis://localhost:6379/1`).
+- Enforced assertions in `conftest.py` ensuring the test suite connects only to Redis DB 1 and never touches DB 0.
+- Jobs carry `run_id` only; workers always use their own configured `DATABASE_URL`, never accepting a DB URL from job payloads.
+- If a worker dequeues a run ID that does not exist in the database, it logs a single short warning and skips the job without a crash or stack trace.
+Consequences: Total queue isolation between test runs and live workers; eliminates cross-database pollution and table-missing crashes.
+
+## D-031 LLM Per-Request Timeout, Fast Daily-Quota Fallback, and Environment Failure Handling
+Status: Accepted
+Context: LLM providers could hang without per-request timeouts, and daily quota exhaustion (HTTP 429 `RESOURCE_EXHAUSTED` / `Queries per day`) triggered slow exponential backoff retry loops (3 attempts over tens of seconds) before failing over to the fallback chain. Furthermore, provider outages did not cleanly abort the run.
+Decision:
+- Added `LLM_REQUEST_TIMEOUT_SECONDS = 60.0` in `config.py` and `.env.example`, applied to `ChatGoogleGenerativeAI(timeout=...)` and `ChatOpenAI(request_timeout=...)`.
+- Intercepted retry predicates in Google GenAI and OpenAI clients: daily-quota errors immediately bypass retries and fall back to the next model without delay.
+- If all providers fail on a test step, mark the test BLOCKED with `ENVIRONMENT_FAILURE`.
+- If two consecutive tests fail due to LLM provider failure, abort the run early as FAILED with a clear notification naming the likely cause (quota or provider outage).
+Consequences: Fast fallback on quota exhaustion; runs fail-fast cleanly when LLM services are unavailable.
+
+## D-032 Process-Level Singleton Embedding Model in Worker
+Status: Accepted
+Context: The worker re-instantiated `LocalEmbedder` on every job, reloading PyTorch model weights from disk and logging "Loading weights" repeatedly.
+Decision:
+- Made `get_embedding_model` cache model instances in a module-level dictionary `_process_model_cache` keyed by model name.
+- Configured arq `WorkerSettings.on_startup = worker_startup` to preload the embedding model once when the worker process boots.
+Consequences: PyTorch weights loaded exactly once per worker process; eliminates redundant disk I/O and job startup latency.
 
 

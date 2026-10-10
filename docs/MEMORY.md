@@ -18,26 +18,26 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Run Experience Improvements & System Hardening (Parts 1-5 Complete)
-- Status: All 5 parts implemented, tested, and committed with zero regressions
+- Current phase: Worker Timeout, Stuck-Run, and Cleanup Hardening (Parts 1-7 Complete)
+- Status: All 7 parts implemented, tested, and committed with zero regressions
 - Date of last update: 2026-10-10
 
 ## 4. Environment Facts (verified)
 - Hardware: 8 GB RAM (about 83% used at idle), Intel Iris Xe integrated GPU, no dedicated GPU. Memory budget rules in D-018 respected throughout.
 - Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations applied to `testpilot`.
-- Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0`.
+- Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0` (app) and `redis://localhost:6379/1` (tests).
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv`, Node v24.19.0, npm 11.17.0, Git 2.55.0.
 - Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 16 passed (7 auth & project tests + 7 run and report tests + 2 error boundary & not-found tests).
 - SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded demo credentials, toggleable planted defects via `SUPPORTDESK_DEFECTS`. All 3 tests (T7.1, T7.2, T7.3) pass cleanly.
-- LangGraph agent foundation, Planner, Executor, Failure Analyst, and Report Generator verified.
-- Complete frontend UI for all 6 screens per DESIGN.md: Login, Register, Dashboard, Project page, Test Run page, and Report page.
-- Run Experience Improvements (Parts 1-5):
-  - Part 1 (fix-1): Shared status styles in `frontend/src/utils/statusStyles.js` covering all backend/test statuses with neutral fallback; React ErrorBoundary with 'Back to project' button; 404 catch-all route; frontend tests for all statuses.
-  - Part 2 (fix-2): 6-stage animated stepper, overall progress bar, live elapsed timer, activity feed, friendly placeholder states, Redis capped live step events list (`run_events:{run_id}`), and live progress tracking (`run_progress:{run_id}`).
-  - Part 3 (fix-3): Auth fail-fast marking test BLOCKED with 0 LLM calls; early run abort as FAILED on 2 consecutive login failures with role naming; run marked FAILED if all tests BLOCKED; executor loop detection (3 identical actions or 4 consecutive unchanged page texts) ending test as FAILED with 0 further LLM calls.
-  - Part 4 (fix-4): SupportDesk and `seed_demo.py` synchronized to root `.env` without hardcoded fallback credentials; one-command reseed script `supportdesk/reseed.py`; credential verification script `backend/scripts/check_target_login.py` printing only role and OK/FAIL with zero secret leakage.
-  - Part 5 (fix-5): Default primary model `gemini-3.5-flash-lite`, rate limit 12 RPM, `RUN_TIMEOUT_SECONDS=1800`, Redis duplicate lock TTL dynamically set longer than run timeout, worker INFO logging with `[run_id=...]` for stages, tests, and sanitized steps, live LLM calls tracking at run completion, and temperature warning suppression for models ignoring it.
-- Test counts: 93 backend unit/integration tests + 3 SupportDesk tests + 16 frontend tests = 112 automated tests passing cleanly (plus 3 live evals).
+- Worker Hardening and Cleanup (Parts 1-7):
+  - Part 1 (fix-1): arq worker timeout set to `RUN_TIMEOUT_SECONDS + 300` (2100s), `max_tries = 1`, `retry_jobs = False`, and in-job graceful timeout via `asyncio.wait_for`.
+  - Part 2 (fix-2): Shielded finalizer `_finalize_run` protecting against cancellation on any exit: updates status to FAILED/CANCELLED with human-readable error, marks unfinished tests BLOCKED, builds partial report, releases Redis lock, clears progress keys, closes MCP process.
+  - Part 3 (fix-3): Non-blocking per-tool timeouts (45s nav, 30s actions/screenshots), Windows process tree termination via `taskkill /F /T /PID` (and POSIX SIGKILL), MCP restart on timeout, tests marked FAILED with ENVIRONMENT_FAILURE, clean teardown of child processes.
+  - Part 4 (fix-4): Worker heartbeat in Redis (`worker_heartbeat:{run_id}`, TTL=60s, 15s refresh), auto-detection of dead workers (>90s without heartbeat marked FAILED with "Worker stopped responding") in GET /runs/{id} and startup sweep, frontend timer stopped on terminal states.
+  - Part 5 (fix-5): Enqueue payload simplified to `run_id` only; worker uses its own configured `DATABASE_URL` instead of job payload; missing run skipped cleanly with single short warning; `TEST_REDIS_URL` in DB 1 prevents test pollution of production queue; verified safety of schema management.
+  - Part 6 (fix-6): LLM per-request timeout configured (`LLM_REQUEST_TIMEOUT_SECONDS=60.0`), fast daily-quota 429 fallback bypassing retry loops, test marked BLOCKED with ENVIRONMENT_FAILURE on provider failure, run aborted early on 2 consecutive provider failures.
+  - Part 7 (fix-7): Embedding model singleton in `_process_model_cache` loaded once per process, preloaded in `WorkerSettings.on_startup`.
+- Test counts: 114 backend unit/integration tests passing (+ 1 skipped, 1 deselected live eval) + 16 frontend tests = 130 tests passing cleanly.
 - Ruff clean on backend and supportdesk; lint clean on frontend.
 
 ## 5. Conventions in Use

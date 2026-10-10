@@ -112,7 +112,14 @@ Phase 14 (Run Experience & Hardening Improvements)
 - T14.4 Auth Fail-Fast: Scripted role login failure marks test BLOCKED with classification AUTHENTICATION_FAILURE and 0 LLM calls; 2 consecutive auth failures aborts run as FAILED naming role; all BLOCKED tests end run as FAILED.
 - T14.5 Executor Loop Detection: 3 identical consecutive actions (action, selector, value) or 4 consecutive unchanged visible page text states terminate test as FAILED with 0 further LLM calls.
 - T14.6 Target App Credentials Synchronization: SupportDesk and seeder read from root .env without hardcoded passwords; reseed script recreates SQLite db; check_target_login verifies stored credentials in memory without leaking secrets.
-- T14.7 Config Defaults & Lock Expiry Alignment: Primary model defaults to gemini-3.5-flash-lite; RPM=12; RUN_TIMEOUT_SECONDS=1800; Redis lock TTL strictly exceeds run timeout; worker logs lifecycle events and total live LLM calls.
+Phase 15 (Worker Timeout, Stuck-Run, and Cleanup Hardening)
+- T15.1 Worker job timeout alignment: WorkerSettings.job_timeout = RUN_TIMEOUT_SECONDS + 300, max_tries = 1, retry_jobs = False, and in-job graceful timeout via asyncio.wait_for.
+- T15.2 Shielded run finalization: _finalize_run protected by asyncio.shield on timeout, cancellation, or exception marks run FAILED/CANCELLED with error message, unfinished tests BLOCKED, builds partial report, releases lock, and closes MCP process.
+- T15.3 Browser tool timeouts & process tree cleanup: Non-blocking timeouts (45s nav, 30s actions/screenshots), taskkill /F /T /PID on Windows (SIGKILL on POSIX) on tool timeout, MCP restart, test marked FAILED (ENVIRONMENT_FAILURE).
+- T15.4 Dead worker detection: Redis worker heartbeat key (TTL=60s, 15s refresh), active runs older than 90s without heartbeat marked FAILED with "Worker stopped responding" in GET /runs/{id} and startup sweep, frontend elapsed timer stopped on terminal states.
+- T15.5 Queue isolation & database independence: Jobs carry run_id only; worker uses configured DATABASE_URL; tests use TEST_REDIS_URL (DB 1) and never touch production queue DB 0; non-existent run logs short warning and skips without crashing.
+- T15.6 LLM per-request timeout & fast quota fallback: LLM_REQUEST_TIMEOUT_SECONDS (60s default) configured; daily-quota 429 errors bypass retry loops to fall back immediately; provider failure marks test BLOCKED (ENVIRONMENT_FAILURE); 2 consecutive provider failures aborts run as FAILED.
+- T15.7 Process-level embedding singleton: LocalEmbedder reuses process-level SentenceTransformer singleton without reloading weights per job; worker preloads embedding model once in WorkerSettings.on_startup.
 
 ## 4. Agent Quality Metrics (record in MEMORY.md after each eval run)
 - Planned tests traceable to a requirement: target 100 percent
