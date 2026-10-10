@@ -29,6 +29,14 @@ assert "testpilot_test" in test_db_url and not test_db_url.rstrip("/").endswith(
     f"DANGER: Tests must NEVER run against testpilot database! (Targeted: {test_db_url})"
 )
 
+# STRICT SAFETY CHECK: Tests must NEVER touch Redis DB 0 (Part 5a)
+if hasattr(settings, "TEST_REDIS_URL") and settings.TEST_REDIS_URL:
+    settings.REDIS_URL = settings.TEST_REDIS_URL
+
+assert not settings.REDIS_URL.rstrip("/").endswith("/0"), (
+    f"DANGER: Tests must NEVER use Redis DB 0! (Targeted: {settings.REDIS_URL})"
+)
+
 test_engine = create_async_engine(
     test_db_url,
     poolclass=NullPool,

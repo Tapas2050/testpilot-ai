@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
+import os
 import uuid
 from typing import Any, Optional
 from urllib.parse import urlparse
 
 from arq.connections import RedisSettings, create_pool
+from sqlalchemy import select
 
 from app.agent.graph import execute_agent_run
 from app.agent.llm import get_live_call_count
@@ -15,31 +17,75 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def parse_redis_settings(url: str) -> RedisSettings:
+    """Parse a Redis URL into arq RedisSettings."""
+    parsed = urlparse(url)
+    return RedisSettings(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 6379,
+        password=parsed.password,
+        database=int(parsed.path.lstrip("/") or 0),
+    )
+
+
+def get_redis_settings(is_test: bool = False) -> RedisSettings:
+    """Parse application REDIS_URL or TEST_REDIS_URL into arq RedisSettings."""
+    settings = get_settings()
+    url = settings.TEST_REDIS_URL if is_test else settings.REDIS_URL
+    return parse_redis_settings(url)
+
+
 async def run_agent_job(
     ctx: dict[str, Any],
     run_id_str: str,
-    project_id_str: str,
-    db_url: Optional[str] = None,
-    force_fail_at: Optional[str] = None,
+    *args: Any,
+    **kwargs: Any,
 ) -> None:
-    """Worker task executed by arq."""
-    run_id = uuid.UUID(run_id_str)
-    project_id = uuid.UUID(project_id_str)
-    logger.info("[run_id=%s] Worker started job for project %s", run_id, project_id)
+    """Worker task executed by arq.
 
-    # Fall back to settings.DATABASE_URL if password was masked with '***'
-    if db_url and ":***@" in db_url:
-        settings = get_settings()
-        db_url = str(settings.DATABASE_URL)
+    Carries run_id only and always uses configured DATABASE_URL.
+    Safely skips missing runs with one short warning and no stack trace.
+    """
+    try:
+        run_id = uuid.UUID(str(run_id_str))
+    except Exception:
+        logger.warning("Worker received invalid run_id: %s. Skipping job.", run_id_str)
+        return
 
     settings = get_settings()
+    configured_db_url = str(
+        settings.TEST_DATABASE_URL
+        if (os.getenv("PYTEST_CURRENT_TEST") and settings.TEST_DATABASE_URL)
+        else settings.DATABASE_URL
+    )
+
+    # Verify run exists in configured database (Requirement 5b)
+    from app.core.database import get_async_session_factory
+    from app.models.test_run import TestRun
+
+    session_factory = get_async_session_factory(configured_db_url)
+    try:
+        async with session_factory() as session:
+            stmt = select(TestRun).where(TestRun.id == run_id)
+            run = (await session.execute(stmt)).scalar_one_or_none()
+            if run is None:
+                logger.warning("TestRun %s not found in database. Skipping job.", run_id)
+                return
+            project_id = run.project_id
+    except Exception as exc:
+        logger.warning(
+            "Database error checking TestRun %s: %s. Skipping job.", run_id, exc
+        )
+        return
+
+    logger.info("[run_id=%s] Worker started job for project %s", run_id, project_id)
+
     try:
         await asyncio.wait_for(
             execute_agent_run(
                 run_id=run_id,
                 project_id=project_id,
-                db_url=db_url,
-                force_fail_at=force_fail_at,
+                db_url=configured_db_url,
             ),
             timeout=float(settings.RUN_TIMEOUT_SECONDS),
         )
@@ -57,18 +103,6 @@ async def run_agent_job(
         )
 
 
-def get_redis_settings() -> RedisSettings:
-    """Parse application REDIS_URL into arq RedisSettings."""
-    settings = get_settings()
-    parsed = urlparse(settings.REDIS_URL)
-    return RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        password=parsed.password,
-        database=int(parsed.path.lstrip("/") or 0),
-    )
-
-
 class WorkerSettings:
     """Configuration for arq worker process."""
 
@@ -82,29 +116,18 @@ class WorkerSettings:
 
 async def enqueue_agent_job(
     run_id: uuid.UUID,
-    project_id: uuid.UUID,
+    project_id: Optional[uuid.UUID] = None,
     db_url: Optional[str] = None,
     force_fail_at: Optional[str] = None,
 ) -> None:
-    """Enqueue a job to arq, or launch background task if worker is direct/testing."""
+    """Enqueue a job carrying run_id only to arq Redis queue."""
+    is_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    # In test mode, use TEST_REDIS_URL (DB 1) and never touch DB 0
+    redis_settings = get_redis_settings(is_test=is_test)
+
     try:
-        redis_settings = get_redis_settings()
         pool = await create_pool(redis_settings)
-        await pool.enqueue_job(
-            "run_agent_job",
-            str(run_id),
-            str(project_id),
-            db_url=db_url,
-            force_fail_at=force_fail_at,
-        )
+        await pool.enqueue_job("run_agent_job", str(run_id))
         await pool.aclose()
-    except Exception:
-        # Fallback to in-process asyncio background task for tests or standalone mode
-        asyncio.create_task(
-            execute_agent_run(
-                run_id=run_id,
-                project_id=project_id,
-                db_url=db_url,
-                force_fail_at=force_fail_at,
-            )
-        )
+    except Exception as exc:
+        logger.debug("[run_id=%s] Could not enqueue to arq: %s", run_id, exc)

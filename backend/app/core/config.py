@@ -26,6 +26,9 @@ class Settings(BaseSettings):
         "", description="PostgreSQL asyncpg test database connection URL"
     )
     REDIS_URL: str = Field("redis://localhost:6379/0", description="Redis connection URL")
+    TEST_REDIS_URL: str = Field(
+        "redis://localhost:6379/1", description="Redis connection URL for test suite (DB 1)"
+    )
     JWT_SECRET: str = Field(..., description="JWT signing secret")
     JWT_EXPIRE_MINUTES: int = Field(60, description="JWT expiration in minutes")
     CREDENTIAL_ENCRYPTION_KEY: str = Field("", description="Fernet encryption key for credentials")

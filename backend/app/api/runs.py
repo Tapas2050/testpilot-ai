@@ -142,15 +142,7 @@ async def create_test_run(
 
     # Enqueue background job
     # We pass the db url if needed for test database execution
-    from app.core.config import get_settings
-
-    settings = get_settings()
-    target_db_url = (
-        db.bind.url.render_as_string(hide_password=False)
-        if db.bind
-        else str(settings.DATABASE_URL)
-    )
-    await enqueue_agent_job(new_run.id, project_id, db_url=target_db_url)
+    await enqueue_agent_job(new_run.id)
 
     return new_run
 
