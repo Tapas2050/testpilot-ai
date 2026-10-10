@@ -9,10 +9,6 @@ import pytest
 from app.agent.graph import execute_agent_run
 
 
-@pytest.mark.xfail(
-    reason="Part 1 reproduction: current code catches inner TimeoutError as run timeout",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_inner_timeout_not_misreported_as_run_deadline_exceeded():
     """Prove that an inner TimeoutError is currently mislabeled as a run timeout.

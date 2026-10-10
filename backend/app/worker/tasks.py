@@ -80,6 +80,11 @@ async def run_agent_job(
 
     logger.info("[run_id=%s] Worker started job for project %s", run_id, project_id)
 
+    import time
+
+    start_mono = time.monotonic()
+    job_deadline = start_mono + float(settings.RUN_TIMEOUT_SECONDS)
+
     try:
         await asyncio.wait_for(
             execute_agent_run(
@@ -87,14 +92,21 @@ async def run_agent_job(
                 project_id=project_id,
                 db_url=configured_db_url,
             ),
-            timeout=float(settings.RUN_TIMEOUT_SECONDS),
+            timeout=float(settings.RUN_TIMEOUT_SECONDS) + 30.0,
         )
-    except asyncio.TimeoutError:
-        logger.error(
-            "[run_id=%s] Run exceeded the time limit of %d seconds",
-            run_id,
-            settings.RUN_TIMEOUT_SECONDS,
-        )
+    except (asyncio.TimeoutError, TimeoutError):
+        if time.monotonic() >= (job_deadline - 0.1):
+            logger.error(
+                "[run_id=%s] Run exceeded the time limit of %d seconds",
+                run_id,
+                settings.RUN_TIMEOUT_SECONDS,
+            )
+        else:
+            logger.error(
+                "[run_id=%s] Worker job caught unexpected inner timeout",
+                run_id,
+                exc_info=True,
+            )
     finally:
         logger.info(
             "[run_id=%s] Worker completed job. Total live LLM calls: %d",

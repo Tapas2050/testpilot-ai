@@ -114,3 +114,78 @@ def decrypt_credential(cipher_text: str) -> str:
         raise ValueError("Cannot decrypt empty credential token")
     f = get_fernet()
     return f.decrypt(cipher_text.encode("utf-8")).decode("utf-8")
+
+
+def sanitize_secret_values(text: Optional[str], secrets: Optional[list[str]] = None) -> str:
+    """Scrub sensitive passwords, tokens, API keys, and connection strings from text."""
+    if not text:
+        return ""
+    clean = str(text)
+
+    import re
+
+    # 1. Scrub credentials from connection strings: postgresql://user:password@host
+    clean = re.sub(r"://([^:\s]+):([^@\s]+)@", r"://\1:[REDACTED]@", clean)
+
+    # 2. Scrub Bearer tokens: Bearer eyJ...
+    clean = re.sub(r"Bearer\s+[A-Za-z0-9_\-\.]+", "Bearer [REDACTED]", clean, flags=re.IGNORECASE)
+
+    # 3. Scrub common API key patterns (Google AI Studio, OpenAI, etc.)
+    clean = re.sub(r"AIza[0-9A-Za-z_\-]{35}", "[REDACTED]", clean)
+    clean = re.sub(r"sk-[0-9A-Za-z_\-]{20,}", "[REDACTED]", clean)
+
+    # 4. Scrub configured secrets from settings
+    try:
+        settings = get_settings()
+        configured_secrets = [
+            getattr(settings, "JWT_SECRET", None),
+            getattr(settings, "CREDENTIAL_ENCRYPTION_KEY", None),
+            getattr(settings, "GOOGLE_API_KEY", None),
+            getattr(settings, "OPENAI_API_KEY", None),
+            getattr(settings, "ANTHROPIC_API_KEY", None),
+        ]
+        for sec in configured_secrets:
+            if sec and isinstance(sec, str) and len(sec) >= 4 and sec in clean:
+                clean = clean.replace(sec, "[REDACTED]")
+    except Exception:
+        pass
+
+    # 5. Scrub explicitly supplied secrets (e.g. project credentials)
+    if secrets:
+        for sec in secrets:
+            if sec and isinstance(sec, str) and len(sec) >= 3 and sec in clean:
+                clean = clean.replace(sec, "[REDACTED]")
+
+    # 6. Scrub password=... or password='...' in strings
+    clean = re.sub(
+        r"(password\s*[:=]\s*['\"]?)([^'\",\s]+)(['\"]?)",
+        r"\1[REDACTED]\3",
+        clean,
+        flags=re.IGNORECASE,
+    )
+
+    return clean
+
+
+def format_run_failure_message(
+    stage: str,
+    exc: Union[str, Exception],
+    test_key: Optional[str] = None,
+    secrets: Optional[list[str]] = None,
+) -> str:
+    """Format an honest, sanitized run failure message."""
+    if isinstance(exc, Exception):
+        exc_type = type(exc).__name__
+        raw_msg = str(exc).strip() or exc_type
+    else:
+        exc_type = "Failure"
+        raw_msg = str(exc).strip()
+
+    clean_msg = sanitize_secret_values(raw_msg, secrets)
+    short_msg = clean_msg.splitlines()[0] if clean_msg else exc_type
+    if len(short_msg) > 300:
+        short_msg = short_msg[:297] + "..."
+
+    test_part = f":{test_key}" if test_key else ""
+    return f"[{stage}{test_part}] {exc_type}: {short_msg}"
+

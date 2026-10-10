@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import time
+import traceback
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -16,6 +18,7 @@ from app.agent.mcp_client import PlaywrightMCPClient, ToolTimeoutError
 from app.agent.state import AgentState
 from app.core.config import get_settings
 from app.core.database import get_async_session_factory
+from app.core.security import format_run_failure_message, sanitize_secret_values
 from app.models.test_run import Failure, TestCase, TestResult, TestRun
 from app.services.run_service import (
     cache_run_status,
@@ -203,13 +206,26 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
         is_mock_mcp = state.get("is_mock_mcp", False) or bool(os.getenv("PYTEST_CURRENT_TEST"))
         mcp_client = PlaywrightMCPClient(is_mock=is_mock_mcp)
         _active_mcp_clients[run_id] = mcp_client
-        await mcp_client.start()
+        try:
+            await mcp_client.start()
+        except Exception as mcp_start_exc:
+            logger.error(
+                "[run_id=%s] Failed to start Playwright MCP client: %s",
+                run_id,
+                mcp_start_exc,
+                exc_info=True,
+            )
+            raise RuntimeError(
+                f"Playwright MCP server failed to start: {mcp_start_exc}"
+            ) from mcp_start_exc
 
         try:
             for tc_idx, tc in enumerate(tcs):
                 if await check_cancellation(state):
                     return {"cancel_requested": True, "current_stage": "CANCELLED"}
 
+                tc_key = getattr(tc, "test_key", None) or f"tc_{tc.order_index + 1}"
+                _active_test_keys[run_id] = tc_key
                 tc.status = "RUNNING"
                 session.add(tc)
                 await session.commit()
@@ -228,6 +244,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                     completed_tests=len(results),
                 )
 
+                test_start_mono = time.monotonic()
                 try:
                     result = await asyncio.wait_for(
                         executor.execute_single_test_case(
@@ -240,7 +257,9 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                         ),
                         timeout=float(settings.TEST_TIMEOUT_SECONDS),
                     )
-                except (ToolTimeoutError, asyncio.TimeoutError) as exc:
+                except (ToolTimeoutError, asyncio.TimeoutError, TimeoutError) as exc:
+                    elapsed = round(time.monotonic() - test_start_mono, 2)
+                    tool_or_step = getattr(exc, "tool_name", None) or "browser_tool"
                     logger.error(
                         "[run_id=%s] Test '%s' timed out (TEST_TIMEOUT_SECONDS=%ds): %s",
                         run_id,
@@ -248,15 +267,27 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                         settings.TEST_TIMEOUT_SECONDS,
                         exc,
                     )
-                    await mcp_client.restart()
-                    timeout_s = settings.TEST_TIMEOUT_SECONDS
+                    try:
+                        await mcp_client.restart()
+                    except Exception as restart_exc:
+                        logger.error(
+                            "[run_id=%s] Failed to restart MCP client: %s",
+                            run_id,
+                            restart_exc,
+                        )
+
+                    detail_msg = exc or "operation timed out"
                     result = TestResult(
                         test_case_id=tc.id,
                         status="FAILED",
                         error_message=(
-                            f"Environment failure: Test timed out after {timeout_s}s ({exc})"
+                            f"ENVIRONMENT_FAILURE: Tool '{tool_or_step}' "
+                            f"timed out after {elapsed}s: {detail_msg}"
                         ),
+                        duration_seconds=elapsed,
                     )
+                finally:
+                    _active_test_keys.pop(run_id, None)
 
                 tc.status = result.status
                 session.add(tc)
@@ -696,6 +727,7 @@ def build_agent_graph(checkpointer=None):
 
 
 _active_mcp_clients: dict[uuid.UUID, Any] = {}
+_active_test_keys: dict[uuid.UUID, str] = {}
 
 
 async def _finalize_run(
@@ -710,6 +742,7 @@ async def _finalize_run(
     Protected against cancellation via asyncio.shield.
     """
     logger.info("[run_id=%s] Running clean finalizer (exit_status=%s)", run_id, exit_status)
+    _active_test_keys.pop(run_id, None)
 
     # 1. Shut down any active MCP client / Chromium child process
     client = _active_mcp_clients.pop(run_id, None)
@@ -873,6 +906,10 @@ async def execute_agent_run(
     exit_status = None
     err_msg = None
 
+    start_monotonic = time.monotonic()
+    deadline = start_monotonic + float(settings.RUN_TIMEOUT_SECONDS)
+    active_stage = "QUEUED"
+
     stop_heartbeat = asyncio.Event()
 
     async def _heartbeat_loop() -> None:
@@ -894,16 +931,40 @@ async def execute_agent_run(
             raise RuntimeError("Forced node exception during execution")
 
         async def _stream_graph():
-            async for _output in graph.astream(initial_state, config=config):
+            nonlocal active_stage
+            active_stage = "PLANNING"
+            async for output in graph.astream(initial_state, config=config):
+                for node_name in output:
+                    if node_name == "plan":
+                        active_stage = "EXECUTING"
+                    elif node_name == "execute":
+                        active_stage = "ANALYZING"
+                    elif node_name == "analyze":
+                        active_stage = "REPORTING"
+                    elif node_name == "report":
+                        active_stage = "COMPLETED"
                 if force_fail_at == "midway":
                     raise RuntimeError("Forced node exception midway through execution")
 
         await asyncio.wait_for(_stream_graph(), timeout=float(settings.RUN_TIMEOUT_SECONDS))
 
-    except asyncio.TimeoutError:
-        exit_status = "FAILED"
-        err_msg = f"Run exceeded the time limit of {settings.RUN_TIMEOUT_SECONDS} seconds"
-        logger.error("[run_id=%s] %s", run_id, err_msg)
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        now_mono = time.monotonic()
+        if now_mono >= (deadline - 0.1):
+            exit_status = "FAILED"
+            err_msg = f"Run exceeded the time limit of {settings.RUN_TIMEOUT_SECONDS} seconds"
+            logger.error("[run_id=%s] %s", run_id, err_msg)
+        else:
+            exit_status = "FAILED"
+            active_tc_key = _active_test_keys.get(run_id)
+            err_msg = format_run_failure_message(
+                stage=active_stage,
+                exc=exc,
+                test_key=active_tc_key,
+            )
+            tb_str = traceback.format_exc()
+            clean_tb = sanitize_secret_values(tb_str)
+            logger.error("[run_id=%s] %s\n%s", run_id, err_msg, clean_tb)
     except asyncio.CancelledError:
         logger.warning("[run_id=%s] Execution cancelled", run_id)
         is_user_cancel = False
@@ -918,14 +979,25 @@ async def execute_agent_run(
             exit_status = "FAILED"
             err_msg = "Worker was interrupted"
     except Exception as exc:
-        err_msg = str(exc)
-        logger.error("[run_id=%s] Agent run failed with exception: %s", run_id, err_msg)
         is_user_cancel = False
         try:
             is_user_cancel = await is_cancel_flag_set(run_id)
         except Exception:
             pass
-        exit_status = "CANCELLED" if is_user_cancel else "FAILED"
+        if is_user_cancel:
+            exit_status = "CANCELLED"
+            err_msg = "Run cancelled by user"
+        else:
+            exit_status = "FAILED"
+            active_tc_key = _active_test_keys.get(run_id)
+            err_msg = format_run_failure_message(
+                stage=active_stage,
+                exc=exc,
+                test_key=active_tc_key,
+            )
+            tb_str = traceback.format_exc()
+            clean_tb = sanitize_secret_values(tb_str)
+            logger.error("[run_id=%s] %s\n%s", run_id, err_msg, clean_tb)
     finally:
         stop_heartbeat.set()
         try:

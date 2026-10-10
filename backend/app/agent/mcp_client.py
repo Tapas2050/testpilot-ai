@@ -74,7 +74,9 @@ atexit.register(_cleanup_all_mcp_processes)
 class ToolTimeoutError(RuntimeError):
     """Raised when a browser tool call exceeds its allocated timeout."""
 
-    pass
+    def __init__(self, message: str, tool_name: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.tool_name = tool_name
 
 
 def get_default_mcp_server_path() -> Path:
@@ -321,7 +323,8 @@ class PlaywrightMCPClient:
             )
             await self.restart()
             raise ToolTimeoutError(
-                f"Browser tool '{tool_name}' timed out after {effective_timeout}s"
+                f"Browser tool '{tool_name}' timed out after {effective_timeout}s",
+                tool_name=tool_name,
             ) from exc
 
     async def close(self) -> None:
