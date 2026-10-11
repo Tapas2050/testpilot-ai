@@ -139,3 +139,14 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] Part 4: Fast preflight checks before planning (target reachability, MCP initialize handshake, credential decryption) with fail-fast user guidance (D-034)
 - [x] Part 5: Honest run state in backend and frontend (preserve real failed_stage, stepper red on failed stage, not-run test reasons, start-new-run button, separate summary tiles) (D-035)
 - [x] Part 6: Consolidated single INFO line for worker startup stale job skipping, unified `project_run_lock:{project_id}` key name and documented manual cleanup commands (D-036)
+
+## Playwright MCP Preflight Hardening, Loop Redesign, and Coverage Hardening
+- [x] Part 1: Diagnose under worker conditions (`backend/scripts/preflight_only.py`, event loop verification, package pinning verification)
+- [x] Part 2: Reliable MCP startup (cold-start budget 45s, automatic retry, single browser start handoff, RSS logging, local_files_only embedding load, D-037)
+- [x] Part 3: Honest error messages (exception class name, elapsed time, budget, hints, sanitized secret values, test cases)
+- [x] Part 4: Documentation and instructions cleanup (reconcile lock TTL, replace passwords with placeholders, update MEMORY.md, DECISIONS.md, TEST_PLAN.md, TASKS.md)
+- [ ] Part 5: Loop detection redesign (no-progress rule, 6-step limit, warning at 2 steps, legitimate form fill progress)
+- [ ] Part 6: Better page observation (compact interactive view) and evidence-supported verdicts
+- [ ] Part 7: Planner coverage (full chunks if <= 30, requirement ID coverage, observable expected results)
+- [ ] Part 8: Logging configuration and ground-truth check
+

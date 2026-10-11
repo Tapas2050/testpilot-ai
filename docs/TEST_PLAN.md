@@ -129,6 +129,13 @@ Phase 16 (False 28s Timeout Bug, Preflight Checks, and Honest State Reporting)
 - T16.5 Honest failure stage and unexecuted tests: test_runs.failed_stage preserves failure stage; stepper marks failed stage red while keeping earlier stages ticked; unexecuted tests marked with reason "Not executed: run stopped (<cause>)"; progress bar counts only executed tests.
 - T16.6 Worker startup stale job draining: worker_startup inspects arq queue and logs single consolidated INFO line for skipped stale jobs; unified project_run_lock key documented across docs and README.
 
+Phase 17 (Playwright MCP Startup Hardening, Resilient Preflight, and Single Browser Launch)
+- T17.1 Preflight diagnostic script: `backend/scripts/preflight_only.py` runs checks under worker conditions with per-check timings and peak RSS tracking.
+- T17.2 Cold-start-tolerant MCP preflight budget: MCP_STARTUP_TIMEOUT_SECONDS (45.0s) separate from quick checks (target ~5s, creds ~2s), with automatic single retry on initial timeout.
+- T17.3 Single browser launch: Preflight hands active MCP client to `execute_node` via `_active_mcp_clients[run_id]`, eliminating redundant second browser start.
+- T17.4 Honest exception reporting & secret sanitization: Exception class name and elapsed time included in all failure messages; empty exception messages formatted as 'no detail'; zero empty parentheses `()`; secrets redacted.
+- T17.5 SentenceTransformer local loading: `local_files_only=True` avoids 18-20s unauthenticated Hugging Face Hub HTTP requests during model load.
+
 ## 4. Agent Quality Metrics (record in MEMORY.md after each eval run)
 - Planned tests traceable to a requirement: target 100 percent
 - Planted defects found on the defective build: target 3 of 3

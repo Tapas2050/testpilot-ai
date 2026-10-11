@@ -264,5 +264,19 @@ Decision:
 - `worker_startup` inspects the arq queue and logs a single consolidated INFO message listing the number of stale jobs skipped.
 Consequences: Accurate operator documentation and clean, uncluttered worker startup logs.
 
+## D-037 Playwright MCP Startup Hardening, Cold-Start Preflight Budget, and Single Browser Launch
+Status: Accepted
+Context: Run 4cef9022-ed1e-417e-9053-552be3eb165f failed in preflight after ~12s with `PreflightCheckError: Playwright MCP server could not start or complete handshake (). Check Node.js and Playwright installation.` The previous preflight had a hardcoded 8.0s timeout, which failed on Windows 11 with 8GB RAM where cold MCP startup takes 15-28s under memory pressure after preloading embeddings (~520MB RSS). The underlying exception was `asyncio.TimeoutError`, whose string representation is empty, causing empty parentheses `()`. In addition, the run was starting the browser twice (once in preflight, then again in execute_node).
+Decision:
+- Package verification: `@executeautomation/playwright-mcp-server` pinned to `1.0.12` in `mcp/package.json` is installed and launched directly using `node` and entrypoint `mcp/node_modules/@executeautomation/playwright-mcp-server/dist/index.js` with `cwd=mcp`. No npx, no cmd shell, no runtime downloads.
+- Introduced configurable `MCP_STARTUP_TIMEOUT_SECONDS = 45.0` in `config.py` separate from quick checks (target reachability ~5s, credential decryption ~2s). Overall preflight limit is the sum of these checks.
+- Added automatic single retry if the initial MCP startup attempt times out or fails.
+- Reused preflight MCP client: preflight returns the started MCP client which is registered in `_active_mcp_clients[run_id]`. `execute_node` reuses the live client without starting a second browser instance. Cleanup is guaranteed on every exit path by `_finalize_run` and `execute_node` finally block.
+- Fast local embedding load: `get_embedding_model` uses `local_files_only=True` to skip Hugging Face Hub online checks, dropping preload time from ~19s to ~0.5s.
+- Log process memory (RSS) at worker startup and during preflight checks.
+- Honest error reporting: `format_exception_summary` formats exceptions with class name, elapsed time, budget, and replaces empty messages with 'no detail', guaranteeing zero empty parentheses `()`.
+Consequences: High reliability during cold start on memory-constrained systems; eliminates redundant browser starts; produces crystal-clear diagnostic failure messages.
+
+
 
 

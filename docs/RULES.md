@@ -59,12 +59,12 @@ Backend
 - ALLOWED_PRIVATE_HOSTS=localhost,127.0.0.1 (the allowlist for private-address blocking, needed for the local SupportDesk)
 
 Redis Key Names
-- Run lock key: `project_run_lock:{project_id}` (prevents duplicate concurrent runs for the same project; TTL=900s)
+- Run lock key: `project_run_lock:{project_id}` (prevents duplicate concurrent runs for the same project; TTL set dynamically from max(RUN_TIMEOUT_SECONDS + 300, 2100), default 2100s per D-025)
 - Heartbeat key: `worker_heartbeat:{run_id}` (worker liveness signal refreshed every 15s; TTL=60s)
 - Status key: `run_status:{run_id}` (cached run status and stage; TTL=1800s)
 - Progress key: `run_progress:{run_id}` (live progress counts; TTL=1800s)
 - Events key: `run_events:{run_id}` (live step events stream; TTL=1800s)
-- Cancel key: `run_cancel:{run_id}` (user cancellation flag; TTL=900s)
+- Cancel key: `run_cancel:{run_id}` (user cancellation flag; TTL set dynamically from lock TTL, default 2100s)
 
 LLM
 - GOOGLE_API_KEY
@@ -84,16 +84,17 @@ Agent limits
 - MAX_STEPS_PER_TEST=15
 - TEST_TIMEOUT_SECONDS=120
 - RUN_TIMEOUT_SECONDS=1800
+- MCP_STARTUP_TIMEOUT_SECONDS=45
 
 SupportDesk (demo target)
 - SUPPORTDESK_URL=http://localhost:8001
 - SUPPORTDESK_DEFECTS=on
 - SUPPORTDESK_ADMIN_EMAIL=admin@supportdesk.local
-- SUPPORTDESK_ADMIN_PASSWORD=Admin#Demo2026
+- SUPPORTDESK_ADMIN_PASSWORD=<configured_in_env>
 - SUPPORTDESK_AGENT_EMAIL=agent@supportdesk.local
-- SUPPORTDESK_AGENT_PASSWORD=Agent#Demo2026
+- SUPPORTDESK_AGENT_PASSWORD=<configured_in_env>
 
-The SupportDesk credentials above are throwaway demo values for a local app only. Never reuse them anywhere real. API keys must be supplied by the user in .env; the coding agent must never ask for them in chat or write them to any file other than .env.
+The SupportDesk credentials above are throwaway demo values whose real passwords exist exclusively in .env (never committed). Never reuse them anywhere real. API keys must be supplied by the user in .env; the coding agent must never ask for them in chat or write them to any file other than .env.
 
 ## 7. Agent Prompt Rules (for the product's own AI agents)
 - Each agent has one narrow responsibility.
