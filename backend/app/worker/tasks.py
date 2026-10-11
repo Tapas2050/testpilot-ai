@@ -117,13 +117,19 @@ async def run_agent_job(
 
 async def worker_startup(ctx: dict[str, Any]) -> None:
     """Preload process-level singleton embedding model and skip stale jobs at worker startup."""
+    from app.core.process_memory import get_process_rss_mb
     from app.services.embedder import get_embedding_model
 
-    logger.info("Worker process starting up; preloading embedding model singleton...")
+    logger.info("Worker process starting up; memory RSS = %.1f MB", get_process_rss_mb())
+    logger.info("Preloading embedding model singleton...")
     try:
         get_embedding_model()
     except Exception as exc:
         logger.warning("Could not preload embedding model on worker startup: %s", exc)
+    logger.info(
+        "Worker startup embedding model preloaded; memory RSS = %.1f MB",
+        get_process_rss_mb(),
+    )
 
     stale_jobs_count = 0
     redis = ctx.get("redis")

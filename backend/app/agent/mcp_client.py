@@ -142,7 +142,7 @@ class PlaywrightMCPClient:
         """Return allocated timeout in seconds for the given tool."""
         return self.tool_timeouts.get(tool_name, self.default_timeout)
 
-    async def start(self) -> None:
+    async def start(self, startup_timeout: Optional[float] = None) -> None:
         """Launch the MCP child process using non-blocking asyncio subprocess."""
         if self.is_mock:
             return
@@ -153,6 +153,7 @@ class PlaywrightMCPClient:
                 "Ensure 'npm install' was run in mcp/ directory."
             )
 
+        timeout = startup_timeout or 45.0
         mcp_cwd = self.server_path.parent.parent.parent.parent
         cwd = str(mcp_cwd) if mcp_cwd.exists() else None
 
@@ -180,7 +181,7 @@ class PlaywrightMCPClient:
             },
         }
         await self._write_msg(init_msg)
-        await self._read_response(self._req_id, timeout=25.0)
+        await self._read_response(self._req_id, timeout=timeout)
 
         # Handshake step 2: notifications/initialized
         notify_msg = {"jsonrpc": "2.0", "method": "notifications/initialized"}

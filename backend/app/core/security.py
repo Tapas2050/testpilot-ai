@@ -167,6 +167,35 @@ def sanitize_secret_values(text: Optional[str], secrets: Optional[list[str]] = N
     return clean
 
 
+def format_exception_summary(
+    exc: Exception,
+    elapsed: Optional[float] = None,
+    budget: Optional[float] = None,
+) -> str:
+    """Format an exception with class name, elapsed time, budget, and sanitized message.
+
+    Never produces empty parentheses or empty messages.
+    """
+    exc_type = type(exc).__name__
+    raw_str = str(exc).strip()
+    msg = raw_str if raw_str else "no detail"
+
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        if elapsed is not None and budget is not None:
+            return f"TimeoutError after {elapsed:.1f}s (budget {budget:.0f}s)"
+        elif elapsed is not None:
+            return f"TimeoutError after {elapsed:.1f}s"
+        elif budget is not None:
+            return f"TimeoutError (budget {budget:.0f}s)"
+        return "TimeoutError after budget expired"
+
+    if elapsed is not None and budget is not None:
+        return f"{exc_type} after {elapsed:.1f}s (budget {budget:.0f}s): {msg}"
+    elif elapsed is not None:
+        return f"{exc_type} after {elapsed:.1f}s: {msg}"
+    return f"{exc_type}: {msg}"
+
+
 def format_run_failure_message(
     stage: str,
     exc: Union[str, Exception],
@@ -176,13 +205,18 @@ def format_run_failure_message(
     """Format an honest, sanitized run failure message."""
     if isinstance(exc, Exception):
         exc_type = type(exc).__name__
-        raw_msg = str(exc).strip() or exc_type
+        raw_msg = str(exc).strip()
+        if not raw_msg:
+            raw_msg = f"{exc_type}: no detail"
     else:
         exc_type = "Failure"
         raw_msg = str(exc).strip()
+        if not raw_msg:
+            raw_msg = "no detail"
 
     clean_msg = sanitize_secret_values(raw_msg, secrets)
-    short_msg = clean_msg.splitlines()[0] if clean_msg else exc_type
+    clean_msg = clean_msg.replace("()", "(no detail)")
+    short_msg = clean_msg.splitlines()[0] if clean_msg else f"{exc_type}: no detail"
     if len(short_msg) > 300:
         short_msg = short_msg[:297] + "..."
 

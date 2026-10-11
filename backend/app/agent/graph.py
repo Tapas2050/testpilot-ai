@@ -205,20 +205,28 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
 
         import os
         is_mock_mcp = state.get("is_mock_mcp", False) or bool(os.getenv("PYTEST_CURRENT_TEST"))
-        mcp_client = PlaywrightMCPClient(is_mock=is_mock_mcp)
-        _active_mcp_clients[run_id] = mcp_client
-        try:
-            await mcp_client.start()
-        except Exception as mcp_start_exc:
-            logger.error(
-                "[run_id=%s] Failed to start Playwright MCP client: %s",
-                run_id,
-                mcp_start_exc,
-                exc_info=True,
-            )
-            raise RuntimeError(
-                f"Playwright MCP server failed to start: {mcp_start_exc}"
-            ) from mcp_start_exc
+        # Avoid starting the browser tool twice: reuse client from preflight if alive
+        mcp_client = _active_mcp_clients.get(run_id)
+        is_dead = (
+            mcp_client is None
+            or mcp_client._process is None
+            or mcp_client._process.returncode is not None
+        )
+        if is_dead:
+            mcp_client = PlaywrightMCPClient(is_mock=is_mock_mcp)
+            _active_mcp_clients[run_id] = mcp_client
+            try:
+                await mcp_client.start()
+            except Exception as mcp_start_exc:
+                logger.error(
+                    "[run_id=%s] Failed to start Playwright MCP client: %s",
+                    run_id,
+                    mcp_start_exc,
+                    exc_info=True,
+                )
+                raise RuntimeError(
+                    f"Playwright MCP server failed to start: {mcp_start_exc}"
+                ) from mcp_start_exc
 
         try:
             for tc_idx, tc in enumerate(tcs):
@@ -944,10 +952,13 @@ async def execute_agent_run(
         await cache_run_status(run_id, status="preflight", stage="preflight")
 
         try:
-            await run_preflight_checks(
+            preflight_res = await run_preflight_checks(
                 project_id=project_id,
                 db_url=db_url,
+                run_id=run_id,
             )
+            if "mcp_client" in preflight_res and preflight_res["mcp_client"]:
+                _active_mcp_clients[run_id] = preflight_res["mcp_client"]
         except PreflightCheckError as p_exc:
             exit_status = "FAILED"
             err_msg = format_run_failure_message(

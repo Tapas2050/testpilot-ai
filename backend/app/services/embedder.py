@@ -13,7 +13,12 @@ def get_embedding_model(model_name: Optional[str] = None) -> Any:
     if name not in _process_model_cache:
         from sentence_transformers import SentenceTransformer
 
-        _process_model_cache[name] = SentenceTransformer(name, device="cpu")
+        try:
+            _process_model_cache[name] = SentenceTransformer(
+                name, device="cpu", local_files_only=True
+            )
+        except Exception:
+            _process_model_cache[name] = SentenceTransformer(name, device="cpu")
     return _process_model_cache[name]
 
 

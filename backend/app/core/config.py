@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     MAX_STEPS_PER_TEST: int = Field(15, description="Max steps per test case")
     TEST_TIMEOUT_SECONDS: int = Field(120, description="Per-test timeout in seconds")
     RUN_TIMEOUT_SECONDS: int = Field(1800, description="Total run timeout in seconds")
+    MCP_STARTUP_TIMEOUT_SECONDS: float = Field(
+        45.0, description="Startup and handshake timeout for Playwright MCP server in seconds"
+    )
 
     # SupportDesk (demo target)
     SUPPORTDESK_URL: str = Field("http://localhost:8001", description="SupportDesk base URL")
