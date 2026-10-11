@@ -22,9 +22,7 @@ from app.models.user import User
 def test_is_daily_quota_error():
     """Verify daily quota error detection distinguishes daily quota vs per-minute rate limits."""
     # Daily quota strings
-    quota_str = (
-        "Quota exceeded for quota metric 'Queries' and limit 'Queries per day' of PROJECT"
-    )
+    quota_str = "Quota exceeded for quota metric 'Queries' and limit 'Queries per day' of PROJECT"
     assert is_daily_quota_error(ValueError(quota_str))
     assert is_daily_quota_error(Exception("429 RESOURCE_EXHAUSTED: daily quota limit reached"))
     assert is_daily_quota_error(RuntimeError("429: insufficient_quota for current model"))
@@ -33,9 +31,7 @@ def test_is_daily_quota_error():
     )
 
     # Per-minute rate limit strings (should return False)
-    assert not is_daily_quota_error(
-        ValueError("429: Rate limit exceeded: 12 requests per minute")
-    )
+    assert not is_daily_quota_error(ValueError("429: Rate limit exceeded: 12 requests per minute"))
     assert not is_daily_quota_error(ValueError("429: rate limit rpm exceeded"))
 
     # Non-quota errors
@@ -54,8 +50,10 @@ def test_llm_request_timeout_configuration():
     assert primary.timeout == settings.LLM_REQUEST_TIMEOUT_SECONDS
 
     # Mock openrouter key and model to inspect timeout
-    with patch.object(settings, "OPENROUTER_API_KEY", "test_key"), \
-         patch.object(settings, "OPENROUTER_MODEL", "test_model"):
+    with (
+        patch.object(settings, "OPENROUTER_API_KEY", "test_key"),
+        patch.object(settings, "OPENROUTER_MODEL", "test_model"),
+    ):
         or_llm = get_openrouter_llm()
         assert or_llm is not None
         assert or_llm.request_timeout == settings.LLM_REQUEST_TIMEOUT_SECONDS
@@ -175,10 +173,13 @@ async def test_two_consecutive_llm_failures_terminates_run_failed(db_session, tm
         )
 
     # Mock MCP client start/close
-    with patch(
-        "app.agent.graph.executor.execute_single_test_case",
-        side_effect=mock_execute_test,
-    ), patch("app.agent.graph.PlaywrightMCPClient") as mock_mcp_cls:
+    with (
+        patch(
+            "app.agent.graph.executor.execute_single_test_case",
+            side_effect=mock_execute_test,
+        ),
+        patch("app.agent.graph.PlaywrightMCPClient") as mock_mcp_cls,
+    ):
         instance = AsyncMock()
         mock_mcp_cls.return_value = instance
 
@@ -194,14 +195,13 @@ async def test_two_consecutive_llm_failures_terminates_run_failed(db_session, tm
 
         # Fast-forward execute node directly
         from app.agent.graph import complete_node, execute_node, report_node
+
         res_exec = await execute_node(initial_state)
 
         # After 2 failures, loop should have broken and tc3 never executed!
         assert call_count == 2
         assert res_exec.get("llm_aborted") is True
-        assert "All LLM providers failed on consecutive tests" in res_exec.get(
-            "abort_message", ""
-        )
+        assert "All LLM providers failed on consecutive tests" in res_exec.get("abort_message", "")
 
         state_after_exec = {**initial_state, **res_exec}
         res_report = await report_node(state_after_exec)
@@ -224,11 +224,16 @@ async def test_two_consecutive_llm_failures_terminates_run_failed(db_session, tm
 
         # Verify failures classified as ENVIRONMENT_FAILURE
         from sqlalchemy import select
+
         failures = (
-            await db_session.execute(
-                select(Failure).where(Failure.test_case_id.in_([tc1.id, tc2.id]))
+            (
+                await db_session.execute(
+                    select(Failure).where(Failure.test_case_id.in_([tc1.id, tc2.id]))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(failures) == 2
         for f in failures:
             assert f.classification == "ENVIRONMENT_FAILURE"

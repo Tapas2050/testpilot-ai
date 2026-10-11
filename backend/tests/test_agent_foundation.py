@@ -296,8 +296,10 @@ async def test_part3_consecutive_login_failures_aborts_run_early_as_failed(
             error_message="Authentication failed for role 'admin': Invalid email or password",
         )
 
-    with patch("app.agent.planner.generate_test_plan", return_value=mock_plan), \
-         patch("app.agent.executor.execute_single_test_case", side_effect=mock_exec_test_case):
+    with (
+        patch("app.agent.planner.generate_test_plan", return_value=mock_plan),
+        patch("app.agent.executor.execute_single_test_case", side_effect=mock_exec_test_case),
+    ):
         await execute_agent_run(
             run_id=run_id,
             project_id=proj_id,
@@ -313,4 +315,3 @@ async def test_part3_consecutive_login_failures_aborts_run_early_as_failed(
     assert data["report"] is not None
     for tc in data["test_cases"]:
         assert tc["status"] == "BLOCKED"
-

@@ -98,12 +98,14 @@ def is_daily_quota_error(exc: Any) -> bool:
 # Patch google.genai retry handler to skip retrying on daily-quota exhaustion
 try:
     from google.genai import _api_client
+
     _orig_retry_args = _api_client.retry_args
 
     def _patched_retry_args(options: Any) -> Any:
         res = _orig_retry_args(options)
         orig_retry = res.get("retry")
         if orig_retry is not None:
+
             def _should_retry_predicate(retry_state: Any) -> bool:
                 if retry_state and retry_state.outcome:
                     exc = retry_state.outcome.exception()
@@ -114,6 +116,7 @@ try:
                         )
                         return False
                 return orig_retry(retry_state)
+
             res["retry"] = _should_retry_predicate
         return res
 
@@ -124,6 +127,7 @@ except Exception as _patch_err:
 # Patch openai retry handler to skip retrying on daily-quota / credit exhaustion
 try:
     from openai._base_client import BaseClient
+
     _orig_should_retry = BaseClient._should_retry
 
     def _patched_should_retry(self: Any, response: Any) -> bool:

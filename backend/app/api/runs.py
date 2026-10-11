@@ -244,10 +244,7 @@ async def get_test_run(
     # Honest progress: count only tests that actually finished
     completed_tests = passed_tests + failed_tests + blocked_tests
 
-    failed_stage = (
-        run.failed_stage
-        or (cached.get("failed_stage") if cached else None)
-    )
+    failed_stage = run.failed_stage or (cached.get("failed_stage") if cached else None)
 
     if run.status == "FAILED":
         current_stage = (
@@ -260,15 +257,11 @@ async def get_test_run(
         current_stage = "COMPLETED"
     elif run.status in ACTIVE_STATUSES:
         current_stage = (
-            progress.get("stage")
-            or (cached.get("stage") if cached else None)
-            or run.status
+            progress.get("stage") or (cached.get("stage") if cached else None) or run.status
         )
     else:
         current_stage = (
-            (cached.get("stage") if cached else None)
-            or progress.get("stage")
-            or "QUEUED"
+            (cached.get("stage") if cached else None) or progress.get("stage") or "QUEUED"
         )
 
     effective_status = run.status

@@ -73,9 +73,7 @@ async def run_agent_job(
                 return
             project_id = run.project_id
     except Exception as exc:
-        logger.warning(
-            "Database error checking TestRun %s: %s. Skipping job.", run_id, exc
-        )
+        logger.warning("Database error checking TestRun %s: %s. Skipping job.", run_id, exc)
         return
 
     logger.info("[run_id=%s] Worker started job for project %s", run_id, project_id)

@@ -88,9 +88,7 @@ async def test_t11_2_analyst_runs_only_for_failed_tests():
         tc2 = TestCase(
             id=tc2_id, run_id=run_id, title="Failed Test", status="FAILED", order_index=2
         )
-        res2 = TestResult(
-            test_case_id=tc2_id, status="FAILED", error_message="Button not found"
-        )
+        res2 = TestResult(test_case_id=tc2_id, status="FAILED", error_message="Button not found")
 
         session.add_all([tc1, res1, tc2, res2])
         await session.commit()

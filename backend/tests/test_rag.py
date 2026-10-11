@@ -59,9 +59,7 @@ async def test_t6_1_chunks_created_and_embedded_dimension(
         "Agents and normal users must never be allowed to delete tickets."
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         upload_resp = await client.post(
             f"/projects/{project_id}/documents",
             files={"file": ("requirements.md", sample_doc.encode("utf-8"), "text/markdown")},
@@ -101,9 +99,7 @@ async def test_t6_2_retrieval_finds_admin_delete_requirement(
         "permanently delete tickets from the database."
     )
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         upload_resp = await client.post(
             f"/projects/{project_id}/documents",
             files={"file": ("roles.txt", doc_content.encode("utf-8"), "text/plain")},
@@ -186,9 +182,7 @@ async def test_t6_4_redis_cache_and_invalidation(
 
     doc_text = "Cache verification: Document content for caching test."
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         upload_resp = await client.post(
             f"/projects/{project_id}/documents",
             files={"file": ("cached.txt", doc_text.encode("utf-8"), "text/plain")},

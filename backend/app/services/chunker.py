@@ -57,7 +57,7 @@ def chunk_text(
                         # Single sentence longer than chunk_size: chunk by hard slice
                         while len(part) > chunk_size:
                             chunks.append(part[:chunk_size])
-                            part = part[chunk_size - overlap:]
+                            part = part[chunk_size - overlap :]
                         current_chunk = part
         else:
             if len(current_chunk) + len(para) + 2 <= chunk_size:

@@ -277,6 +277,22 @@ Decision:
 - Honest error reporting: `format_exception_summary` formats exceptions with class name, elapsed time, budget, and replaces empty messages with 'no detail', guaranteeing zero empty parentheses `()`.
 Consequences: High reliability during cold start on memory-constrained systems; eliminates redundant browser starts; produces crystal-clear diagnostic failure messages.
 
-
-
-
+## D-038 Visible HTML Observation, Redesigned Loop Detection, and Verifiable Verdicts
+Status: Accepted
+Context: In prior runs, form-based tests (ticket creation, status updates, search) were prematurely terminated with "Execution loop detected: visible page text unchanged for 4 consecutive steps" because typing into form fields does not alter visible text. Furthermore, the executor only saw the first 1000 characters of raw visible text without interactive elements, and PASSED verdicts lacked verifiable page evidence.
+Decision:
+- Loop detection redesign:
+  * Kept 3 identical consecutive actions (action, selector, value) as a loop terminating as TEST_FAILURE.
+  * Replaced unchanged-text rule with a no-progress rule: a step counts as no-progress only if it is a click or navigate whose resulting page state (URL, visible text, and form values snapshot) is unchanged, or if the tool returned an error. Fill and select with value do not count toward no-progress.
+  * Raised no-progress limit to 6 consecutive no-progress steps.
+  * Injected prompt warning at 2 consecutive no-progress steps ("WARNING: Your last two actions had no visible effect; try a different approach or finish").
+  * Loop failures terminate with status FAILED and are recorded directly as `TEST_FAILURE`, bypassing LLM analyst.
+- Page observation & tool allowlist:
+  * Added read-only tool `playwright_get_visible_html` to `ALLOWLISTED_TOOLS` in `mcp_client.py`.
+  * Security reasoning: The tool is strictly read-only and strips `<script>` and `<style>` tags via server parameters (`removeScripts=True`, `removeStyles=True`) and client-side `HTMLParser`, preventing stored XSS or prompt injection script execution.
+  * Parsed compact page view: URL, title, interactive elements (buttons, inputs, selects, links with IDs, names, current values), and clean visible text up to 3000 characters.
+- Verifiable verdicts:
+  * Added `evidence: Optional[str]` to `ExecutorAction`.
+  * When verdict is PASSED, code verifies the evidence quote appears in normalized visible page text or current URL.
+  * If unsupported, code prompts the model once to correct evidence; if still unsupported, test fails with "verdict not supported by page evidence".
+Consequences: Form-based testing runs cleanly without false loop terminations; executor makes accurate element interactions with full DOM visibility; eliminates hallucinated passes.

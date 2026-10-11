@@ -148,6 +148,6 @@ async def generate_test_plan(
 
     # Enforce MAX_TESTS_PER_RUN
     if len(plan.test_cases) > settings.MAX_TESTS_PER_RUN:
-        plan.test_cases = plan.test_cases[:settings.MAX_TESTS_PER_RUN]
+        plan.test_cases = plan.test_cases[: settings.MAX_TESTS_PER_RUN]
 
     return plan

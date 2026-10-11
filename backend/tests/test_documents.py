@@ -55,16 +55,14 @@ async def user_and_project(client: AsyncClient) -> Tuple[dict, dict, dict]:
 
 @pytest.mark.asyncio
 async def test_t5_1_supported_types_upload_and_extract(
-    user_and_project: Tuple[dict, dict, dict]
+    user_and_project: Tuple[dict, dict, dict],
 ) -> None:
     """T5.1: Each supported type (PDF, TXT, Markdown, JSON) uploads and extracts text."""
     auth_user, project, _ = user_and_project
     headers = auth_user["headers"]
     project_id = project["id"]
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # 1. PDF Upload & Extraction
         pdf_bytes = generate_sample_pdf("System Specification: Ticket delete requires admin role.")
         pdf_resp = await client.post(
@@ -121,17 +119,13 @@ async def test_t5_1_supported_types_upload_and_extract(
 
 
 @pytest.mark.asyncio
-async def test_t5_2_rejected_uploads(
-    user_and_project: Tuple[dict, dict, dict]
-) -> None:
+async def test_t5_2_rejected_uploads(user_and_project: Tuple[dict, dict, dict]) -> None:
     """T5.2: Wrong type, spoofed type, empty and oversized files rejected."""
     auth_user, project, _ = user_and_project
     headers = auth_user["headers"]
     project_id = project["id"]
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # 1. Wrong type (e.g. .exe or .py)
         resp = await client.post(
             f"/projects/{project_id}/documents",
@@ -181,16 +175,14 @@ async def test_t5_2_rejected_uploads(
 
 @pytest.mark.asyncio
 async def test_t5_3_stored_filename_is_generated_uuid(
-    user_and_project: Tuple[dict, dict, dict]
+    user_and_project: Tuple[dict, dict, dict],
 ) -> None:
     """T5.3: Stored filename is generated UUID, never the original user input."""
     auth_user, project, _ = user_and_project
     headers = auth_user["headers"]
     project_id = project["id"]
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Attempt path traversal in original filename
         malicious_name = "../../../etc/passwd.txt"
         resp = await client.post(

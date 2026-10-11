@@ -113,9 +113,7 @@ async def test_job_payload_and_worker_db_url_decoupling(db_session: AsyncSession
         assert call_kwargs["project_id"] == proj_id
         # Worker must have used its own configured database URL (never job db_url)
         expected_db_url = str(
-            settings.TEST_DATABASE_URL
-            if settings.TEST_DATABASE_URL
-            else settings.DATABASE_URL
+            settings.TEST_DATABASE_URL if settings.TEST_DATABASE_URL else settings.DATABASE_URL
         )
         assert call_kwargs["db_url"] == expected_db_url
         assert "bogus" not in call_kwargs["db_url"]

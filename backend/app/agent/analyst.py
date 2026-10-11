@@ -27,12 +27,8 @@ class FailureAnalysisOutput(BaseModel):
     classification: FailureClassification = Field(
         description="Root cause category of the test failure"
     )
-    severity: FailureSeverity = Field(
-        description="Severity level of the defect or failure"
-    )
-    confidence: float = Field(
-        ge=0.0, le=1.0, description="Confidence score from 0.0 to 1.0"
-    )
+    severity: FailureSeverity = Field(description="Severity level of the defect or failure")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score from 0.0 to 1.0")
     expected: str = Field(description="Expected behavior per source requirement")
     observed: str = Field(description="Observed behavior during browser test execution")
     explanation: str = Field(description="Detailed technical explanation of root cause")
@@ -78,10 +74,10 @@ async def analyze_test_failure(
 
     user_prompt = f"""Failed Test Case:
 Title: {title}
-Description: {description or 'N/A'}
-Source Requirement: {source_requirement or 'N/A'}
-Target Role: {target_role or 'None'}
-Error Message: {error_message or 'None'}
+Description: {description or "N/A"}
+Source Requirement: {source_requirement or "N/A"}
+Target Role: {target_role or "None"}
+Error Message: {error_message or "None"}
 
 Execution Steps & Observations:
 {history}

@@ -27,9 +27,7 @@ async def test_t13_1_login_rate_limiting_triggers_429(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_t13_1_run_creation_rate_limiting_triggers_429(
-    client: AsyncClient, auth_headers
-):
+async def test_t13_1_run_creation_rate_limiting_triggers_429(client: AsyncClient, auth_headers):
     """T13.1: Exceeding 5 run creation requests in 60 seconds returns 429."""
     headers, user_id, proj_id = auth_headers
 

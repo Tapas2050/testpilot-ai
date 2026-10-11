@@ -184,6 +184,7 @@ async def test_t9_7_eval_supportdesk_requirements_plan():
     priority persistence, and logout.
     """
     from pathlib import Path
+
     req_path = Path(__file__).resolve().parents[2] / "SUPPORTDESK_REQUIREMENTS.md"
     assert req_path.exists(), "SUPPORTDESK_REQUIREMENTS.md must exist for evaluation"
     req_content = req_path.read_text(encoding="utf-8")

@@ -9,11 +9,13 @@ import fitz  # PyMuPDF
 
 class DocumentValidationError(Exception):
     """Raised when an uploaded document fails type, size, or content validation."""
+
     pass
 
 
 class ExtractionError(Exception):
     """Raised when an uploaded document cannot be parsed or text extracted."""
+
     pass
 
 

@@ -146,6 +146,7 @@ async def update_run_in_db(
         await session.commit()
     else:
         from app.core.database import get_async_session_factory
+
         factory = get_async_session_factory(db_url)
         async with factory() as s:
             await s.execute(update(TestRun).where(TestRun.id == run_id).values(**values))
@@ -274,11 +275,7 @@ async def check_and_fail_dead_run(run: TestRun, session: AsyncSession) -> bool:
 
     # Mark unfinished test cases as BLOCKED and ensure TestResult exists
     try:
-        tc_stmt = (
-            select(TestCase)
-            .where(TestCase.run_id == run.id)
-            .order_by(TestCase.order_index)
-        )
+        tc_stmt = select(TestCase).where(TestCase.run_id == run.id).order_by(TestCase.order_index)
         tcs = (await session.execute(tc_stmt)).scalars().all()
         for tc in tcs:
             if tc.status not in ("PASSED", "FAILED", "BLOCKED"):
@@ -305,17 +302,11 @@ async def check_and_fail_dead_run(run: TestRun, session: AsyncSession) -> bool:
         if not run.report:
             from app.agent.report import generate_run_report
 
-            tcs_data = [
-                {"id": str(tc.id), "status": tc.status, "title": tc.title}
-                for tc in tcs
-            ]
+            tcs_data = [{"id": str(tc.id), "status": tc.status, "title": tc.title} for tc in tcs]
             results_data = [
-                {"status": r.status, "test_case_id": str(r.test_case_id)}
-                for r in existing_results
+                {"status": r.status, "test_case_id": str(r.test_case_id)} for r in existing_results
             ]
-            run.report = generate_run_report(
-                test_cases=tcs_data, results=results_data, failures=[]
-            )
+            run.report = generate_run_report(test_cases=tcs_data, results=results_data, failures=[])
     except Exception as e:
         logger.error("[run_id=%s] Error finalizing dead run test cases: %s", run.id, e)
 
@@ -349,5 +340,3 @@ async def sweep_dead_runs(session: AsyncSession) -> list[uuid.UUID]:
         if await check_and_fail_dead_run(run, session):
             failed_run_ids.append(run.id)
     return failed_run_ids
-
-

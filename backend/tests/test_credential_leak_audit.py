@@ -129,11 +129,13 @@ async def test_t13_3_api_responses_and_reports_contain_no_credentials(
         id=uuid.uuid4(),
         test_case_id=tc.id,
         status="PASSED",
-        steps=[{
-            "step": 1,
-            "tool": "playwright_fill",
-            "arguments": {"selector": "#pwd", "value": "[REDACTED]"},
-        }],
+        steps=[
+            {
+                "step": 1,
+                "tool": "playwright_fill",
+                "arguments": {"selector": "#pwd", "value": "[REDACTED]"},
+            }
+        ],
         screenshot_path="storage/screenshots/audit.png",
     )
     db_session.add(tr)

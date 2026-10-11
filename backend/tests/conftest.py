@@ -62,9 +62,11 @@ def setup_test_db_schema():
             await conn.run_sync(Base.metadata.create_all)
 
         from app.core.database import ensure_db_schema
+
         await ensure_db_schema(test_engine)
 
         from app.agent.checkpointer import get_checkpointer
+
         get_checkpointer(test_db_url).setup()
 
     asyncio.run(_setup())
@@ -187,6 +189,7 @@ async def auth_headers(
 @pytest.fixture(autouse=True)
 def mock_preflight_target_reachable(monkeypatch):
     """By default in unit tests, assume target URL is reachable unless test explicitly overrides."""
+
     async def _dummy_reachable(url: str, timeout: float = 5.0) -> None:
         return None
 

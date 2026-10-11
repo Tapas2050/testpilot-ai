@@ -142,4 +142,3 @@ def test_format_run_failure_message_secret_inside_message():
     assert "AIzaSyD9876543210zyx" not in msg
     assert "MySecretPass!99" not in msg
     assert "[REDACTED]" in msg
-

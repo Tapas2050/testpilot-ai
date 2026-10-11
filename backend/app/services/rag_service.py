@@ -43,9 +43,7 @@ class RAGService:
         except Exception as e:
             logger.warning(f"Failed to invalidate Redis RAG cache for project {project_id}: {e}")
 
-    async def index_document(
-        self, db: AsyncSession, document: Document
-    ) -> List[DocumentChunk]:
+    async def index_document(self, db: AsyncSession, document: Document) -> List[DocumentChunk]:
         """Split document text into chunks, generate embeddings, and persist in pgvector."""
         if not document.extracted_text or not document.extracted_text.strip():
             return []

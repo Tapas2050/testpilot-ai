@@ -12,18 +12,21 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Strict security allowlist per SECURITY.md and D-008
-ALLOWLISTED_TOOLS: frozenset[str] = frozenset({
-    "playwright_navigate",
-    "playwright_screenshot",
-    "playwright_click",
-    "playwright_fill",
-    "playwright_select",
-    "playwright_hover",
-    "playwright_get_visible_text",
-    "playwright_press_key",
-    "playwright_close",
-})
+# Strict security allowlist per SECURITY.md and D-008, D-038
+ALLOWLISTED_TOOLS: frozenset[str] = frozenset(
+    {
+        "playwright_navigate",
+        "playwright_screenshot",
+        "playwright_click",
+        "playwright_fill",
+        "playwright_select",
+        "playwright_hover",
+        "playwright_get_visible_text",
+        "playwright_get_visible_html",
+        "playwright_press_key",
+        "playwright_close",
+    }
+)
 
 # Configurable tool timeouts (navigation 45s, other actions 30s, screenshot 30s)
 DEFAULT_TOOL_TIMEOUTS: dict[str, float] = {
@@ -295,6 +298,24 @@ class PlaywrightMCPClient:
                 if isinstance(resp, Exception):
                     raise resp
                 return resp
+            if tool_name == "playwright_get_visible_html":
+                text_mock = self._mock_responses.get("playwright_get_visible_text", {})
+                inner_text = (
+                    text_mock.get("text") if isinstance(text_mock, dict) else str(text_mock)
+                )
+                if not inner_text:
+                    inner_text = f"Page content placeholder step {len(self._called_tools)}"
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"<html><head><title>Mock Page</title></head>"
+                                f"<body><p>{inner_text}</p></body></html>"
+                            ),
+                        }
+                    ]
+                }
             if tool_name == "playwright_get_visible_text":
                 return {"text": f"Page content placeholder step {len(self._called_tools)}"}
             if tool_name == "playwright_screenshot":

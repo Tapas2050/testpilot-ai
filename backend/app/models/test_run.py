@@ -20,29 +20,21 @@ class TestRun(Base):
     __tablename__ = "test_runs"
     __test__ = False
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    status: Mapped[str] = mapped_column(
-        String(32), default="QUEUED", nullable=False, index=True
-    )
+    status: Mapped[str] = mapped_column(String(32), default="QUEUED", nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    started_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    completed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     failed_stage: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -65,9 +57,7 @@ class TestCase(Base):
     __tablename__ = "test_cases"
     __test__ = False
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("test_runs.id", ondelete="CASCADE"),
@@ -78,9 +68,7 @@ class TestCase(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     source_requirement: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     target_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    status: Mapped[str] = mapped_column(
-        String(32), default="PENDING", nullable=False, index=True
-    )
+    status: Mapped[str] = mapped_column(String(32), default="PENDING", nullable=False, index=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Relationships
@@ -99,9 +87,7 @@ class TestResult(Base):
     __tablename__ = "test_results"
     __test__ = False
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     test_case_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("test_cases.id", ondelete="CASCADE"),
@@ -123,9 +109,7 @@ class Failure(Base):
 
     __tablename__ = "failures"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     test_case_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("test_cases.id", ondelete="CASCADE"),

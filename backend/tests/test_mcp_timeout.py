@@ -101,6 +101,7 @@ async def test_test_timeout_stops_hanging_tool_and_continues(db_session):
         if test_case.id == tc1.id:
             raise ToolTimeoutError("Browser tool 'playwright_click' timed out after 30.0s")
         from app.models.test_run import TestResult
+
         return TestResult(test_case_id=test_case.id, status="PASSED")
 
     with (
@@ -122,6 +123,7 @@ async def test_test_timeout_stops_hanging_tool_and_continues(db_session):
 
     # Verify ENVIRONMENT_FAILURE record was created for test 1
     from sqlalchemy import select
+
     stmt = select(Failure).where(Failure.test_case_id == tc1.id)
     failure = (await db_session.execute(stmt)).scalar_one_or_none()
     assert failure is not None
