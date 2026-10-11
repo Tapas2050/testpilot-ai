@@ -532,7 +532,12 @@ def api_login(data: dict):
 
 
 @app.get("/api/tickets")
-def api_list_tickets(request: Request, q: Optional[str] = None):
+def api_list_tickets(
+    request: Request,
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+    status_filter: Optional[str] = None,
+):
     require_auth(request)
     settings = get_settings()
     conn = get_connection()
@@ -540,6 +545,12 @@ def api_list_tickets(request: Request, q: Optional[str] = None):
 
     sql = "SELECT * FROM tickets WHERE 1=1"
     params = []
+
+    filter_status = status or status_filter
+    if filter_status and filter_status.strip():
+        sql += " AND status = ?"
+        params.append(filter_status.strip().upper())
+
 
     if q and q.strip():
         search_term = q.strip()

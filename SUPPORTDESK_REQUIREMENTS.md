@@ -70,3 +70,17 @@ Only users with the **Administrator** role (`admin`) are permitted to delete tic
 
 ### REQ-SEC-02: Support Agent Deletion Prohibition
 Users with the **Support Agent** role (`agent`) MUST NOT be allowed to delete tickets. Any deletion attempt by a Support Agent MUST be rejected with HTTP 403 Forbidden. Under no circumstance should a non-admin user be permitted to delete a ticket.
+
+---
+
+## 6. Appendix: Seed Test Data
+
+For testing and verification of ticket search, status filtering, details inspection, and role-based deletion, the database is pre-seeded with five known reference tickets:
+
+| ID | Title | Priority | Status | Customer Email | Assignee |
+|---|---|---|---|---|---|
+| #1 | Cannot reset user password | High | OPEN | alice@example.com | agent@supportdesk.local |
+| #2 | Billing statement discrepancy | Medium | IN_PROGRESS | bob@example.com | admin@supportdesk.local |
+| #3 | Feature request: Dark mode | Low | RESOLVED | charlie@example.com | agent@supportdesk.local |
+| #4 | Network latency issue | High | CLOSED | david@example.com | admin@supportdesk.local |
+| #5 | Login session expires prematurely | Medium | OPEN | eva@example.com | Unassigned |

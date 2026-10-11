@@ -15,12 +15,13 @@ from pathlib import Path
 backend_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_dir))
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import get_settings
 from app.core.security import encrypt_credential, hash_password
+from app.models.chunk import DocumentChunk
 from app.models.credential import ProjectCredential
 from app.models.document import Document
 from app.models.project import Project
@@ -144,6 +145,7 @@ async def seed():
             )
             existing_doc = (await db.execute(doc_stmt)).scalar_one_or_none()
 
+            rag_service = RAGService()
             if not existing_doc:
                 doc = Document(
                     id=uuid.uuid4(),
@@ -161,11 +163,22 @@ async def seed():
                 await db.refresh(doc)
 
                 print("[+] Indexing requirements into vector embeddings...")
-                rag_service = RAGService()
                 chunks = await rag_service.index_document(db, doc)
                 print(f"[+] Successfully indexed {len(chunks)} requirement chunks into pgvector.")
             else:
-                print("[*] Requirements document already seeded and indexed.")
+                existing_doc.extracted_text = content
+                existing_doc.size_bytes = len(content.encode("utf-8"))
+                db.add(existing_doc)
+
+                await db.execute(
+                    delete(DocumentChunk).where(DocumentChunk.document_id == existing_doc.id)
+                )
+                await db.commit()
+                await db.refresh(existing_doc)
+
+                print("[+] Re-indexing updated requirements document into vector embeddings...")
+                chunks = await rag_service.index_document(db, existing_doc)
+                print(f"[+] Re-indexed {len(chunks)} requirement chunks into pgvector.")
         else:
             print(f"[!] Warning: Requirements file not found at {req_file}")
 

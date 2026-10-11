@@ -189,3 +189,61 @@ def test_t7_2_defective_build(monkeypatch):
     # Defect 1 check: Agent delete succeeds (should have been 403 forbidden)!
     agent_delete = client.delete(f"/api/tickets/{ticket_id}", headers=agent_headers)
     assert agent_delete.status_code == 204
+
+
+def test_seeded_tickets_data(monkeypatch):
+    """Verify that seeded tickets exist with expected properties and can be filtered."""
+    monkeypatch.setenv("SUPPORTDESK_DEFECTS", "off")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    from app.main import app
+
+    client = TestClient(app)
+
+    agent_login = client.post(
+        "/api/login",
+        json={"email": settings.SUPPORTDESK_AGENT_EMAIL, "password": settings.SUPPORTDESK_AGENT_PASSWORD},
+    )
+    assert agent_login.status_code == 200
+    agent_headers = {"Authorization": f"Bearer {agent_login.json()['access_token']}"}
+
+    # Verify all 5 seeded tickets exist
+    resp = client.get("/api/tickets", headers=agent_headers)
+    assert resp.status_code == 200
+    tickets = resp.json()
+    assert len(tickets) >= 5
+
+    ticket_map = {t["id"]: t for t in tickets}
+    assert 1 in ticket_map
+    assert ticket_map[1]["title"] == "Cannot reset user password"
+    assert ticket_map[1]["priority"] == "High"
+    assert ticket_map[1]["status"] == "OPEN"
+
+    assert 2 in ticket_map
+    assert ticket_map[2]["title"] == "Billing statement discrepancy"
+    assert ticket_map[2]["priority"] == "Medium"
+    assert ticket_map[2]["status"] == "IN_PROGRESS"
+
+    assert 3 in ticket_map
+    assert ticket_map[3]["status"] == "RESOLVED"
+
+    assert 4 in ticket_map
+    assert ticket_map[4]["status"] == "CLOSED"
+
+    # Status filter
+    open_resp = client.get("/api/tickets?status=OPEN", headers=agent_headers)
+    assert open_resp.status_code == 200
+    open_tickets = open_resp.json()
+    assert all(t["status"] == "OPEN" for t in open_tickets)
+    open_ids = [t["id"] for t in open_tickets]
+    assert 1 in open_ids
+    assert 5 in open_ids
+
+    # Search by title on seeded ticket
+    search_pwd = client.get("/api/tickets?q=password", headers=agent_headers)
+    assert search_pwd.status_code == 200
+    assert any(t["id"] == 1 for t in search_pwd.json())
+

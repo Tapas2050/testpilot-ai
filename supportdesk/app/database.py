@@ -67,5 +67,67 @@ def init_db(seed: bool = True) -> None:
             (settings.SUPPORTDESK_AGENT_EMAIL, settings.SUPPORTDESK_AGENT_PASSWORD, "agent"),
         )
 
+        # Seed realistic initial tickets (Part 6)
+        seed_tickets = [
+            (
+                1,
+                "Cannot reset user password",
+                "Customer reports password reset link expires immediately upon receipt.",
+                "High",
+                "OPEN",
+                "alice@example.com",
+                settings.SUPPORTDESK_AGENT_EMAIL,
+                "2026-10-10 10:00:00",
+            ),
+            (
+                2,
+                "Billing statement discrepancy",
+                "Invoice reflects an unexpected extra charge on monthly renewal.",
+                "Medium",
+                "IN_PROGRESS",
+                "bob@example.com",
+                settings.SUPPORTDESK_ADMIN_EMAIL,
+                "2026-10-10 11:30:00",
+            ),
+            (
+                3,
+                "Feature request: Dark mode",
+                "User requested persistent dark mode theme option across settings.",
+                "Low",
+                "RESOLVED",
+                "charlie@example.com",
+                settings.SUPPORTDESK_AGENT_EMAIL,
+                "2026-10-10 14:15:00",
+            ),
+            (
+                4,
+                "Network latency issue",
+                "API requests from regional office experience intermittent latency spikes.",
+                "High",
+                "CLOSED",
+                "david@example.com",
+                settings.SUPPORTDESK_ADMIN_EMAIL,
+                "2026-10-10 16:45:00",
+            ),
+            (
+                5,
+                "Login session expires prematurely",
+                "Session cookies are invalidated after 5 minutes of inactivity.",
+                "Medium",
+                "OPEN",
+                "eva@example.com",
+                None,
+                "2026-10-11 09:00:00",
+            ),
+        ]
+        cursor.executemany(
+            """
+            INSERT OR REPLACE INTO tickets
+            (id, title, description, priority, status, customer_email, assignee, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            seed_tickets,
+        )
+
     conn.commit()
     conn.close()
