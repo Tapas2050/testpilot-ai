@@ -621,3 +621,284 @@ async def test_part6_mocked_model_claiming_passed_with_valid_quote_is_accepted(t
     finally:
         set_mock_llm(None)
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part5_action_validation_empty_target_reprompted(tmp_path: Path):
+    """Part 5(a): An action with missing/empty required field ('select on empty string')
+
+    is rejected, re-prompted once without counting as a step, and executed if corrected.
+    """
+    from app.agent.executor import CheckResult
+
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Validation retry test",
+        description="Verify empty selector is re-prompted",
+        source_requirement="REQ-VAL-01",
+        target_role=None,
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+    client.set_mock_response(
+        "playwright_get_visible_text",
+        {"text": "SupportDesk Status Page"},
+    )
+
+    # First decision: select on empty selector (the "select on ''" bug from real run)
+    invalid_action = ExecutorAction(
+        thought="Attempt select without selector",
+        action="select",
+        selector="",
+        value="Open",
+    )
+    # Corrected decision on re-prompt: finish with verified check
+    corrected_action = ExecutorAction(
+        thought="Select was invalid; finish with verified check",
+        action="finish",
+        final_status="PASSED",
+        evidence="Status Page",
+        check_results=[
+            CheckResult(
+                check_id="CHK-1",
+                result="PASSED",
+                evidence="Status Page",
+                observation="Page text verified on status page correctly",
+            )
+        ],
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=[invalid_action, corrected_action])
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        # The re-prompt was called, the invalid action did NOT execute as a step,
+        # and test finished with PASSED
+        assert mock_llm.ainvoke.call_count == 2
+        assert result.status == "PASSED"
+        assert len(result.steps) == 1  # Only the finish step was recorded
+        assert result.steps[0]["action"] == "finish"
+    finally:
+        set_mock_llm(None)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part5_check_unverified_evidence_becomes_inconclusive_blocked(tmp_path: Path):
+    """Part 5(b,c): A PASSED check without verified evidence becomes INCONCLUSIVE
+
+    after one correction round; test verdict becomes BLOCKED (could not verify: <check>).
+    """
+    from app.agent.executor import CheckResult
+
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Check Evidence Verification",
+        description="User searches for ticket ID",
+        source_requirement="REQ-SRCH-01",
+        target_role=None,
+        checks=[
+            {
+                "check_id": "CHK-1",
+                "description": "After searching for ticket ID, results list contains that ticket",
+                "source_requirement": "REQ-SRCH-01",
+            }
+        ],
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+    client.set_mock_response(
+        "playwright_get_visible_text",
+        {"text": "Search Results: No tickets found matching criteria"},
+    )
+
+    # Both initial and retry claim PASSED with fake quote
+    fake_finish = ExecutorAction(
+        thought="Claiming pass without evidence on page",
+        action="finish",
+        final_status="PASSED",
+        evidence="Ticket #999 found",
+        check_results=[
+            CheckResult(
+                check_id="CHK-1",
+                result="PASSED",
+                evidence="Ticket #999 found",
+                observation="Found ticket in the results list",
+            )
+        ],
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=[fake_finish, fake_finish])
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        # Verdict must be BLOCKED (could not verify: <check>)
+        assert result.status == "BLOCKED"
+        assert "could not verify:" in (result.error_message or "")
+        assert mock_llm.ainvoke.call_count == 2  # Included correction round
+    finally:
+        set_mock_llm(None)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part5_negative_check_without_attempt_becomes_inconclusive_blocked(tmp_path: Path):
+    """Part 5(d): Negative check without an attempted action is not PASSED
+
+    and becomes BLOCKED.
+    """
+    from app.agent.executor import CheckResult
+
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Agent Deletion Prohibition",
+        description="Agent cannot delete a ticket",
+        source_requirement="REQ-SEC-02",
+        target_role=None,
+        checks=[
+            {
+                "check_id": "CHK-1",
+                "description": "Agent cannot delete tickets and delete button is absent",
+                "source_requirement": "REQ-SEC-02",
+            }
+        ],
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+    client.set_mock_response(
+        "playwright_get_visible_text",
+        {"text": "SupportDesk Agent Dashboard with Ticket List"},
+    )
+
+    # Immediately finishes claiming PASSED without ever attempting or inspecting ticket page
+    claimed_finish = ExecutorAction(
+        thought="I assume agent cannot delete without checking",
+        action="finish",
+        final_status="PASSED",
+        evidence="Ticket List",
+        check_results=[
+            CheckResult(
+                check_id="CHK-1",
+                result="PASSED",
+                evidence="Ticket List",
+                observation="Agent deletion is prohibited as expected",
+            )
+        ],
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=[claimed_finish, claimed_finish])
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        # Because it never attempted any action after login, negative check cannot pass
+        assert result.status == "BLOCKED"
+        assert "could not verify:" in (result.error_message or "")
+    finally:
+        set_mock_llm(None)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part5_bundled_test_with_one_failing_check_is_failed(tmp_path: Path):
+    """Part 5(c,g): A test with one passing check and one failing check ends FAILED."""
+    from app.agent.executor import CheckResult
+
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Multi-Check Verification",
+        description="Verify status update and priority persistence",
+        source_requirement="REQ-TKT-03",
+        target_role=None,
+        checks=[
+            {
+                "check_id": "CHK-1",
+                "description": "Ticket status is updated to In Progress",
+                "source_requirement": "REQ-TKT-03",
+            },
+            {
+                "check_id": "CHK-2",
+                "description": "Ticket priority High is stored as High",
+                "source_requirement": "REQ-TKT-04",
+            },
+        ],
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+    client.set_mock_response(
+        "playwright_get_visible_text",
+        {"text": "Status: In Progress | Priority: Low"},
+    )
+
+    finish_action = ExecutorAction(
+        thought="CHK-1 succeeded but CHK-2 failed (priority is Low instead of High)",
+        action="finish",
+        check_results=[
+            CheckResult(
+                check_id="CHK-1",
+                result="PASSED",
+                evidence="In Progress",
+                observation="Ticket status is displayed as In Progress",
+            ),
+            CheckResult(
+                check_id="CHK-2",
+                result="FAILED",
+                evidence="Priority: Low",
+                observation="Ticket priority High was stored as Low on the page",
+            ),
+        ],
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(return_value=finish_action)
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        # Any FAILED check makes the entire test FAILED
+        assert result.status == "FAILED"
+        assert "Ticket priority High was stored as Low" in (result.error_message or "")
+    finally:
+        set_mock_llm(None)
+        await client.close()
