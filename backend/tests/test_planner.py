@@ -270,3 +270,112 @@ async def test_part7_requirement_coverage_accounting_with_11_ids_and_cap_of_8():
     assert all_accounted == set(req_ids)
     assert len(all_accounted) == 11
 
+
+def test_part4_single_role_enforcement():
+    """Part 4(a): Each test case targets exactly ONE role; multi-role strings are rejected."""
+    # Valid single roles
+    tc_admin = PlannedTestCase(
+        title="Admin Test",
+        description="Admin actions",
+        source_requirement="REQ-SEC-01",
+        target_role="admin",
+    )
+    assert tc_admin.target_role == "admin"
+
+    tc_agent = PlannedTestCase(
+        title="Agent Test",
+        description="Agent actions",
+        source_requirement="REQ-SEC-02",
+        target_role="agent",
+    )
+    assert tc_agent.target_role == "agent"
+
+    # Multi-role strings must be rejected
+    invalid_roles = [
+        "admin, agent",
+        "admin and agent",
+        "admin/agent",
+        "agent + admin",
+        "admin; agent",
+    ]
+    for role in invalid_roles:
+        with pytest.raises(ValidationError):
+            PlannedTestCase(
+                title="Invalid Role Test",
+                description="Testing with multiple roles",
+                source_requirement="REQ-SEC-01",
+                target_role=role,
+            )
+
+
+def test_part4_planned_checks_validation_and_sanitization():
+    """Part 4(b): Checks list validation, HTTP code sanitization, and clamping."""
+    from app.agent.planner import PlannedCheck
+
+    # Check validates and sanitizes HTTP status codes to observable outcomes
+    chk = PlannedCheck(
+        check_id="CHK-1",
+        description="After submitting form, verify HTTP 200 response and ticket appears",
+        source_requirement="REQ-TKT-01",
+    )
+    assert "HTTP 200" not in chk.description
+    assert "observable page result" in chk.description
+
+    # Empty description or invalid source requirement rejected
+    with pytest.raises(ValidationError):
+        PlannedCheck(check_id="CHK-1", description="", source_requirement="REQ-TKT-01")
+
+    with pytest.raises(ValidationError):
+        PlannedCheck(
+            check_id="CHK-1",
+            description="Valid description",
+            source_requirement="unknown",
+        )
+
+    # PlannedTestCase with > 4 checks is clamped to 4
+    many_checks = [
+        PlannedCheck(check_id=f"CHK-{i}", description=f"Check {i}", source_requirement="REQ-TKT-01")
+        for i in range(1, 7)
+    ]
+    tc = PlannedTestCase(
+        title="Clamped Checks Test",
+        description="Has 6 checks",
+        source_requirement="REQ-TKT-01",
+        target_role="admin",
+        checks=many_checks,
+    )
+    assert len(tc.checks) == 4
+    assert [c.check_id for c in tc.checks] == ["CHK-1", "CHK-2", "CHK-3", "CHK-4"]
+
+
+@pytest.mark.asyncio
+async def test_part4_default_cap_is_12_and_overflow_tracked():
+    """Part 4(c,d): Default cap is 12, overflow requirement IDs tracked in uncovered."""
+    settings = get_settings()
+    assert settings.MAX_TESTS_PER_RUN == 12
+
+    fifteen_cases = [
+        PlannedTestCase(
+            title=f"Test Case {i}",
+            description=f"Description {i}",
+            source_requirement=f"REQ-{i:02d}",
+            target_role="admin",
+        )
+        for i in range(1, 16)
+    ]
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(return_value=PlanOutput(test_cases=fifteen_cases))
+    set_mock_llm(mock_llm)
+
+    plan = await generate_test_plan(
+        requirements_text="Requirements text",
+        project_url="http://localhost:8001",
+    )
+
+    assert len(plan.test_cases) == 12
+    # Overflow cases (13, 14, 15) must be preserved in uncovered_requirements
+    assert "REQ-13" in plan.uncovered_requirements
+    assert "REQ-14" in plan.uncovered_requirements
+    assert "REQ-15" in plan.uncovered_requirements
+

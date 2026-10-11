@@ -296,3 +296,23 @@ Decision:
   * When verdict is PASSED, code verifies the evidence quote appears in normalized visible page text or current URL.
   * If unsupported, code prompts the model once to correct evidence; if still unsupported, test fails with "verdict not supported by page evidence".
 Consequences: Form-based testing runs cleanly without false loop terminations; executor makes accurate element interactions with full DOM visibility; eliminates hallucinated passes.
+
+## D-039 Trustworthy Coverage: Single-Role Tests, Per-Check Evidence, and 12-Test Cap Quota Math
+Status: Accepted
+Context: In run 85109bf4-7983-405b-baa6-b7074bb717e9, the planner bundled multiple roles (e.g. TC-8 admin deletion and agent deletion prohibition) and multiple requirements (e.g. TC-7 ID search, title search, and status filter) into single tests because the test count was capped at 8 while there were ~11 requirements. This caused false-positive PASSED verdicts (e.g. TC-8 passed as admin without ever testing agent prohibition, and TC-7 passed without verifying ID search).
+Decision:
+- Planner rules:
+  * Each test case targets exactly ONE role ('admin' or 'agent') and one focused behavior. Tests requiring multiple roles must be planned as separate test cases.
+  * Unrelated requirements must not be bundled into one test case.
+  * Each test case contains 1 to 4 observable UI checks (`PlannedCheck`), each with a unique `check_id`, short UI observation description from requirement text, and cited `source_requirement`.
+  * Expected results must come strictly from requirement text, never invented HTTP codes or DB states.
+  * Persisted `checks` in `test_cases.checks` (JSONB) via Alembic migration `ab3237ee3bf4`.
+- Default test cap raised from 8 to 12:
+  * Empirical measurement from run 85109bf4-7983-405b-baa6-b7074bb717e9: 25 executor LLM calls across 8 tests = 3.125 calls/test (<= 6.0 calls/test threshold).
+  * Rate limit quota math:
+    - Enforced rate limit: 12 requests/minute (min interval = 5.0 seconds).
+    - At 12 tests per run: Planner makes 1-2 calls; Executor makes 12 * 3.125 = ~38 calls; Analyst evaluates only failures (~2-4 failed tests * 1-2 calls = ~4-8 calls). Total LLM calls per run = ~45-50 calls.
+    - Duration: 50 calls with 5.0s spacing = ~250s (~4.2 minutes). The execution naturally distributes calls and never exceeds the 12 RPM rate limit.
+    - Daily quota: With a budget of 500 requests/day per model, a 12-test run uses ~50 calls, allowing up to 10 full runs per day per model before reaching daily limits.
+- When requirement count exceeds the cap, overflow cases are truncated and their requirement IDs are preserved in `uncovered_requirements` in the plan and test report.
+Consequences: Full, trustworthy test coverage for all requirement IDs with single-role isolation and observable checks without exceeding RPM or daily LLM quotas.

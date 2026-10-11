@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     EMBEDDING_DIM: int = Field(384, description="Embedding dimension")
 
     # Agent limits
-    MAX_TESTS_PER_RUN: int = Field(8, description="Max tests planned per run")
+    MAX_TESTS_PER_RUN: int = Field(12, description="Max tests planned per run")
     MAX_STEPS_PER_TEST: int = Field(15, description="Max steps per test case")
     TEST_TIMEOUT_SECONDS: int = Field(120, description="Per-test timeout in seconds")
     RUN_TIMEOUT_SECONDS: int = Field(1800, description="Total run timeout in seconds")

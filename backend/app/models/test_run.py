@@ -70,6 +70,7 @@ class TestCase(Base):
     target_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="PENDING", nullable=False, index=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    checks: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(JSONB, nullable=True)
 
     # Relationships
     run: Mapped["TestRun"] = relationship("TestRun", back_populates="test_cases")

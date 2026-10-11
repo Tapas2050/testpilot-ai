@@ -137,6 +137,7 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
                 target_role=tc.target_role,
                 status="PENDING",
                 order_index=idx,
+                checks=[c.model_dump() for c in tc.checks] if getattr(tc, "checks", None) else None,
             )
             session.add(db_tc)
             db_test_cases.append(db_tc)
@@ -155,6 +156,7 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
                 "title": db_tc.title,
                 "role": db_tc.target_role,
                 "source_requirement": db_tc.source_requirement,
+                "checks": db_tc.checks,
             }
             for db_tc in db_test_cases
         ]
