@@ -964,6 +964,9 @@ async def execute_agent_run(
     force_fail_at: Optional[str] = None,
 ) -> None:
     """Execute the full agent workflow for a given TestRun."""
+    from app.core.logging import current_run_id
+
+    run_token = current_run_id.set(str(run_id))
     now = datetime.now(timezone.utc)
     await update_run_in_db(run_id, started_at=now, db_url=db_url)
 
@@ -1014,6 +1017,7 @@ async def execute_agent_run(
 
         # Fast preflight checks before planning stage
         active_stage = "preflight"
+        logger.info("[run_id=%s] Stage changed to preflight", run_id)
         await update_run_in_db(run_id, status="preflight", db_url=db_url)
         await cache_run_status(run_id, status="preflight", stage="preflight")
 
@@ -1125,3 +1129,4 @@ async def execute_agent_run(
             run_id,
             get_live_call_count(),
         )
+        current_run_id.reset(run_token)

@@ -2,8 +2,9 @@
 
 import contextvars
 import logging
+import os
 import re
-from typing import Optional
+from typing import Optional, Union
 
 # Context variable tracking current test run ID across async execution
 current_run_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
@@ -42,17 +43,42 @@ class SensitiveDataFilter(logging.Filter):
         return True
 
 
-def setup_structured_logging(level: int = logging.INFO) -> None:
+def setup_structured_logging(level: Optional[Union[int, str]] = None) -> None:
     """Configure root logger with structured format and security filters."""
+    resolved_level: int = logging.INFO
+    if level is None:
+        try:
+            from app.core.config import get_settings
+
+            level_str = get_settings().LOG_LEVEL
+            resolved_level = getattr(logging, str(level_str).upper(), logging.INFO)
+        except Exception:
+            resolved_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    elif isinstance(level, str):
+        resolved_level = getattr(logging, level.upper(), logging.INFO)
+    elif isinstance(level, int):
+        resolved_level = level
+
     log_format = "%(asctime)s [%(levelname)s] [run_id:%(run_id)s] [%(name)s] %(message)s"
     formatter = logging.Formatter(log_format)
 
     handler = logging.StreamHandler()
     handler.setFormatter(formatter)
+    handler.setLevel(resolved_level)
     handler.addFilter(RunContextFilter())
     handler.addFilter(SensitiveDataFilter())
 
     root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    # Clear existing handlers to avoid duplicates
-    root_logger.handlers = [handler]
+    root_logger.setLevel(resolved_level)
+    # Clear existing handlers to avoid duplicates,
+    # but preserve test/capture handlers (e.g. pytest caplog)
+    capture_handlers = [
+        h
+        for h in root_logger.handlers
+        if "Capture" in type(h).__name__ or getattr(h, "name", "") == "log-capture"
+    ]
+    root_logger.handlers = [handler] + capture_handlers
+
+    # Explicitly set level on app and arq loggers
+    logging.getLogger("app").setLevel(resolved_level)
+    logging.getLogger("arq").setLevel(resolved_level)

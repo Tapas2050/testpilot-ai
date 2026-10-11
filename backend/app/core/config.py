@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     ALLOWED_PRIVATE_HOSTS: Union[str, List[str]] = Field(
         "localhost,127.0.0.1", description="Allowed private hosts for target URL validation"
     )
+    LOG_LEVEL: str = Field(
+        "INFO", description="Log level for API and worker (DEBUG, INFO, WARNING, ERROR)"
+    )
 
     @field_validator("JWT_SECRET", mode="after")
     @classmethod

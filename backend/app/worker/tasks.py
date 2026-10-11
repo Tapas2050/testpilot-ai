@@ -52,72 +52,80 @@ async def run_agent_job(
         logger.warning("Worker received invalid run_id: %s. Skipping job.", run_id_str)
         return
 
-    settings = get_settings()
-    configured_db_url = str(
-        settings.TEST_DATABASE_URL
-        if (os.getenv("PYTEST_CURRENT_TEST") and settings.TEST_DATABASE_URL)
-        else settings.DATABASE_URL
-    )
+    from app.core.logging import current_run_id
 
-    # Verify run exists in configured database (Requirement 5b)
-    from app.core.database import get_async_session_factory
-    from app.models.test_run import TestRun
-
-    session_factory = get_async_session_factory(configured_db_url)
+    run_token = current_run_id.set(str(run_id))
     try:
-        async with session_factory() as session:
-            stmt = select(TestRun).where(TestRun.id == run_id)
-            run = (await session.execute(stmt)).scalar_one_or_none()
-            if run is None:
-                logger.warning("TestRun %s not found in database. Skipping job.", run_id)
-                return
-            project_id = run.project_id
-    except Exception as exc:
-        logger.warning("Database error checking TestRun %s: %s. Skipping job.", run_id, exc)
-        return
-
-    logger.info("[run_id=%s] Worker started job for project %s", run_id, project_id)
-
-    import time
-
-    start_mono = time.monotonic()
-    job_deadline = start_mono + float(settings.RUN_TIMEOUT_SECONDS)
-
-    try:
-        await asyncio.wait_for(
-            execute_agent_run(
-                run_id=run_id,
-                project_id=project_id,
-                db_url=configured_db_url,
-            ),
-            timeout=float(settings.RUN_TIMEOUT_SECONDS) + 30.0,
+        settings = get_settings()
+        configured_db_url = str(
+            settings.TEST_DATABASE_URL
+            if (os.getenv("PYTEST_CURRENT_TEST") and settings.TEST_DATABASE_URL)
+            else settings.DATABASE_URL
         )
-    except (asyncio.TimeoutError, TimeoutError):
-        if time.monotonic() >= (job_deadline - 0.1):
-            logger.error(
-                "[run_id=%s] Run exceeded the time limit of %d seconds",
-                run_id,
-                settings.RUN_TIMEOUT_SECONDS,
+
+        # Verify run exists in configured database (Requirement 5b)
+        from app.core.database import get_async_session_factory
+        from app.models.test_run import TestRun
+
+        session_factory = get_async_session_factory(configured_db_url)
+        try:
+            async with session_factory() as session:
+                stmt = select(TestRun).where(TestRun.id == run_id)
+                run = (await session.execute(stmt)).scalar_one_or_none()
+                if run is None:
+                    logger.warning("TestRun %s not found in database. Skipping job.", run_id)
+                    return
+                project_id = run.project_id
+        except Exception as exc:
+            logger.warning("Database error checking TestRun %s: %s. Skipping job.", run_id, exc)
+            return
+
+        logger.info("[run_id=%s] Worker started job for project %s", run_id, project_id)
+
+        import time
+
+        start_mono = time.monotonic()
+        job_deadline = start_mono + float(settings.RUN_TIMEOUT_SECONDS)
+
+        try:
+            await asyncio.wait_for(
+                execute_agent_run(
+                    run_id=run_id,
+                    project_id=project_id,
+                    db_url=configured_db_url,
+                ),
+                timeout=float(settings.RUN_TIMEOUT_SECONDS) + 30.0,
             )
-        else:
-            logger.error(
-                "[run_id=%s] Worker job caught unexpected inner timeout",
+        except (asyncio.TimeoutError, TimeoutError):
+            if time.monotonic() >= (job_deadline - 0.1):
+                logger.error(
+                    "[run_id=%s] Run exceeded the time limit of %d seconds",
+                    run_id,
+                    settings.RUN_TIMEOUT_SECONDS,
+                )
+            else:
+                logger.error(
+                    "[run_id=%s] Worker job caught unexpected inner timeout",
+                    run_id,
+                    exc_info=True,
+                )
+        finally:
+            logger.info(
+                "[run_id=%s] Worker completed job. Total live LLM calls: %d",
                 run_id,
-                exc_info=True,
+                get_live_call_count(),
             )
     finally:
-        logger.info(
-            "[run_id=%s] Worker completed job. Total live LLM calls: %d",
-            run_id,
-            get_live_call_count(),
-        )
+        current_run_id.reset(run_token)
 
 
 async def worker_startup(ctx: dict[str, Any]) -> None:
     """Preload process-level singleton embedding model and skip stale jobs at worker startup."""
+    from app.core.logging import setup_structured_logging
     from app.core.process_memory import get_process_rss_mb
     from app.services.embedder import get_embedding_model
 
+    setup_structured_logging()
     logger.info("Worker process starting up; memory RSS = %.1f MB", get_process_rss_mb())
     logger.info("Preloading embedding model singleton...")
     try:
