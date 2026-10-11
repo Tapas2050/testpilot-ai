@@ -405,7 +405,7 @@ def view_ticket(request: Request, ticket_id: int):
             <h1 style="margin-top: 4px;" id="ticket-title">#{ticket['id']} - {ticket['title']}</h1>
         </div>
         <div>
-            <form method="POST" action="/tickets/{ticket['id']}/delete" style="display: inline;" onsubmit="return confirm('Permanently delete ticket?');">
+            <form method="POST" action="/tickets/{ticket['id']}/delete" style="display: inline;">
                 <button class="btn btn-danger" id="delete-ticket-btn" type="submit">Delete Ticket</button>
             </form>
         </div>

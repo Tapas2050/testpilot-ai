@@ -43,9 +43,10 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-m 'not eval'"
+addopts = "-m 'not eval and not browser'"
 markers = [
     "eval: live evaluation tests with live LLM calls",
+    "browser: live browser tests using real Playwright MCP server against SupportDesk",
 ]
 
 [tool.ruff]

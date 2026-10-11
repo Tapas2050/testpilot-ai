@@ -229,7 +229,11 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
 
         import os
 
-        is_mock_mcp = state.get("is_mock_mcp", False) or bool(os.getenv("PYTEST_CURRENT_TEST"))
+        is_mock_mcp = (
+            state["is_mock_mcp"]
+            if "is_mock_mcp" in state
+            else bool(os.getenv("PYTEST_CURRENT_TEST"))
+        )
         # Avoid starting the browser tool twice: reuse client from preflight if alive
         mcp_client = _active_mcp_clients.get(run_id)
         is_dead = (
@@ -1051,9 +1055,11 @@ async def execute_agent_run(
 
         try:
             injected_mcp = _active_mcp_clients.get(run_id)
+            is_mock_preflight = initial_state.get("is_mock_mcp")
             preflight_res = await run_preflight_checks(
                 project_id=project_id,
                 db_url=db_url,
+                is_mock_mcp=is_mock_preflight,
                 run_id=run_id if injected_mcp is None else None,
             )
             if injected_mcp is None and preflight_res.get("mcp_client"):
