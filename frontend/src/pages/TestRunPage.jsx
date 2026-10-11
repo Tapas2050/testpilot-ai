@@ -746,16 +746,68 @@ export function TestRunPage() {
                             <strong>Preconditions: </strong> {tc.preconditions}
                           </div>
                         )}
-                        {tc.steps && (
-                          <div style={{ marginBottom: '12px' }}>
-                            <strong>Planned Steps:</strong>
-                            <ol style={{ margin: '6px 0 0 20px', padding: 0, color: '#334155' }}>
-                              {(Array.isArray(tc.steps) ? tc.steps : []).map((step, sIdx) => (
-                                <li key={sIdx} style={{ marginBottom: '4px' }}>
-                                  {typeof step === 'string' ? step : step.action || JSON.stringify(step)}
-                                </li>
-                              ))}
-                            </ol>
+
+                        {/* Planned Checks & Verdicts */}
+                        {tc.checks && tc.checks.length > 0 && (
+                          <div style={{ marginBottom: '14px' }}>
+                            <div style={{ fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                              Requirement Checks:
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {tc.checks.map((chk, cIdx) => {
+                                const chkRes = (res?.check_results || tc.check_results || []).find((cr) => cr.check_id === chk.check_id);
+                                const chkStatus = chkRes?.result || 'PENDING';
+                                const badgeStyle = chkStatus === 'PASSED'
+                                  ? { bg: '#DCFCE7', text: '#166534', border: '#86EFAC' }
+                                  : chkStatus === 'FAILED'
+                                  ? { bg: '#FEE2E2', text: '#991B1B', border: '#FECACA' }
+                                  : chkStatus === 'INCONCLUSIVE'
+                                  ? { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' }
+                                  : { bg: '#F1F5F9', text: '#475569', border: '#E2E8F0' };
+                                return (
+                                  <div
+                                    key={chk.check_id || cIdx}
+                                    style={{
+                                      padding: '8px 12px',
+                                      backgroundColor: '#FFFFFF',
+                                      border: '1px solid #E2E8F0',
+                                      borderRadius: '6px',
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                      fontSize: '13px',
+                                    }}
+                                  >
+                                    <div>
+                                      <span style={{ fontWeight: 500 }}>{chk.description || chk.check_id}</span>
+                                      {chk.source_requirement && (
+                                        <span style={{ marginLeft: '8px', fontSize: '11px', color: '#4F46E5', fontFamily: 'monospace' }}>
+                                          [{chk.source_requirement}]
+                                        </span>
+                                      )}
+                                      {chkRes?.evidence && (
+                                        <div style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
+                                          Evidence: <em>"{chkRes.evidence}"</em>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <span
+                                      style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        fontSize: '11px',
+                                        fontWeight: 700,
+                                        backgroundColor: badgeStyle.bg,
+                                        color: badgeStyle.text,
+                                        border: `1px solid ${badgeStyle.border}`,
+                                      }}
+                                    >
+                                      {chkStatus}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
 
@@ -791,74 +843,152 @@ export function TestRunPage() {
                           </div>
                         )}
 
-                        {res && (
-                          <div
-                            style={{
-                              marginTop: '16px',
-                              padding: '12px',
-                              backgroundColor: '#FFFFFF',
-                              borderRadius: '6px',
-                              border: '1px solid #E2E8F0',
-                            }}
-                          >
-                            <div style={{ fontWeight: 600, marginBottom: '8px' }}>
-                              Execution Results
-                            </div>
-                            {res.observations && (
-                              <div style={{ marginBottom: '8px', color: '#475569' }}>
-                                <strong>Observations: </strong> {res.observations}
-                              </div>
-                            )}
+                        {/* Execution Details Box */}
+                        {(() => {
+                          const execSteps = res?.steps || tc.steps || res?.action_log || [];
+                          const duration = res?.duration_seconds ?? tc.duration_seconds;
+                          const finalObs = res?.final_observation || tc.final_observation || res?.observations;
+                          const evidenceQuote = res?.evidence || tc.evidence;
+                          const screenshotPath = res?.screenshot_path || tc.screenshot_path || (res?.evidence_paths && res.evidence_paths[0]);
 
-                            {res.action_log && res.action_log.length > 0 && (
-                              <div style={{ marginTop: '10px' }}>
-                                <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '4px' }}>
-                                  Action Log:
+                          return (
+                            <div
+                              style={{
+                                marginTop: '16px',
+                                padding: '14px 16px',
+                                backgroundColor: '#FFFFFF',
+                                borderRadius: '6px',
+                                border: '1px solid #E2E8F0',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontWeight: 600,
+                                  marginBottom: '10px',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <span>Execution Results</span>
+                                {duration !== null && duration !== undefined && (
+                                  <span style={{ fontSize: '12px', fontWeight: 500, color: '#64748B' }}>
+                                    Duration: {duration.toFixed(1)}s
+                                  </span>
+                                )}
+                              </div>
+
+                              {finalObs && (
+                                <div style={{ marginBottom: '8px', color: '#334155', fontSize: '13px' }}>
+                                  <strong>Final Observation: </strong> {finalObs}
                                 </div>
+                              )}
+
+                              {evidenceQuote && (
+                                <div style={{ marginBottom: '10px', color: '#334155', fontSize: '13px' }}>
+                                  <strong>Evidence Quote: </strong> <em>"{evidenceQuote}"</em>
+                                </div>
+                              )}
+
+                              {/* Step Timeline */}
+                              {execSteps && execSteps.length > 0 ? (
+                                <div style={{ marginTop: '12px' }}>
+                                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '6px' }}>
+                                    Step Timeline ({execSteps.length} steps):
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                    {execSteps.map((step, sIdx) => {
+                                      const act = step.action || step.tool || 'action';
+                                      const badgeStyle = getActionBadgeStyle(act);
+                                      const obsText = (step.observation || step.thought || step.error || (step.arguments ? JSON.stringify(step.arguments) : '')).slice(0, 300);
+                                      return (
+                                        <div
+                                          key={sIdx}
+                                          data-testid="step-timeline-item"
+                                          style={{
+                                            padding: '8px 12px',
+                                            backgroundColor: '#F8FAFC',
+                                            border: '1px solid #E2E8F0',
+                                            borderRadius: '6px',
+                                            fontSize: '12px',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '3px',
+                                          }}
+                                        >
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                            <span style={{ fontWeight: 600, color: '#334155' }}>
+                                              Step {step.step || sIdx + 1}:
+                                            </span>
+                                            <span
+                                              style={{
+                                                padding: '2px 8px',
+                                                borderRadius: '4px',
+                                                fontSize: '11px',
+                                                fontWeight: 600,
+                                                backgroundColor: badgeStyle.bg,
+                                                color: badgeStyle.text,
+                                              }}
+                                            >
+                                              {act}
+                                            </span>
+                                            {(step.selector || step.url) && (
+                                              <code
+                                                style={{
+                                                  fontSize: '11px',
+                                                  color: '#4F46E5',
+                                                  backgroundColor: '#EEF2FF',
+                                                  padding: '1px 6px',
+                                                  borderRadius: '3px',
+                                                }}
+                                              >
+                                                {step.selector || step.url}
+                                              </code>
+                                            )}
+                                          </div>
+                                          {obsText && (
+                                            <div style={{ color: '#475569', fontSize: '12px', lineHeight: 1.4 }}>
+                                              {obsText}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ) : (
                                 <div
+                                  data-testid="no-steps-message"
                                   style={{
-                                    backgroundColor: '#0F172A',
-                                    color: '#F8FAFC',
-                                    fontFamily: 'monospace',
-                                    fontSize: '12px',
-                                    padding: '10px',
-                                    borderRadius: '4px',
-                                    maxHeight: '160px',
-                                    overflowY: 'auto',
+                                    marginTop: '8px',
+                                    padding: '10px 12px',
+                                    backgroundColor: '#F8FAFC',
+                                    border: '1px solid #E2E8F0',
+                                    borderRadius: '6px',
+                                    color: '#64748B',
+                                    fontSize: '13px',
                                   }}
                                 >
-                                  {res.action_log.map((action, aIdx) => (
-                                    <div key={aIdx} style={{ marginBottom: '2px' }}>
-                                      &gt; Step {action.step}: {action.tool} (
-                                      {JSON.stringify(action.arguments || {})})
-                                    </div>
-                                  ))}
+                                  No steps recorded for this test ({res?.error_message || tc.error_message || (!res && isTerminal ? 'run terminated before executing this scenario' : 'scenario concluded without recorded steps')}).
                                 </div>
-                              </div>
-                            )}
+                              )}
 
-                            {res.evidence_paths && res.evidence_paths.length > 0 && (
-                              <div style={{ marginTop: '12px' }}>
-                                <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '6px' }}>
-                                  Captured Screenshots:
+                              {/* Screenshot Thumbnail */}
+                              {screenshotPath && (
+                                <div style={{ marginTop: '14px' }}>
+                                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '6px' }}>
+                                    Screenshot Evidence:
+                                  </div>
+                                  <ScreenshotViewer
+                                    runId={runId}
+                                    filename={screenshotPath.split(/[\\/]/).pop()}
+                                    caption={`Evidence ${tc.test_key || tc.title}`}
+                                  />
                                 </div>
-                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                  {res.evidence_paths.map((p, pIdx) => {
-                                    const filename = p.split(/[\\/]/).pop();
-                                    return (
-                                      <ScreenshotViewer
-                                        key={pIdx}
-                                        runId={runId}
-                                        filename={filename}
-                                        caption={`Evidence ${tc.test_key || ''}`}
-                                      />
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>

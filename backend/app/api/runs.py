@@ -31,6 +31,90 @@ from app.worker import enqueue_agent_job
 router = APIRouter(tags=["runs"])
 
 
+def sanitize_step_timeline(steps: Optional[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Sanitize and truncate step timeline for lightweight API responses (Part 2)."""
+    if not steps:
+        return []
+    clean_steps = []
+    for s in steps:
+        obs = s.get("observation")
+        if obs and isinstance(obs, str) and len(obs) > 300:
+            obs = obs[:297] + "..."
+        thought = s.get("thought")
+        if thought and isinstance(thought, str) and len(thought) > 300:
+            thought = thought[:297] + "..."
+        err = s.get("error")
+        if err and isinstance(err, str) and len(err) > 300:
+            err = err[:297] + "..."
+
+        step_entry: dict[str, Any] = {
+            "step": s.get("step"),
+            "action": s.get("action", "action"),
+            "status": s.get("status", "ok"),
+        }
+        if s.get("selector"):
+            step_entry["selector"] = str(s["selector"])[:100]
+        if s.get("url"):
+            step_entry["url"] = str(s["url"])[:200]
+        if s.get("value") is not None:
+            step_entry["value"] = str(s["value"])[:100]
+        if s.get("key"):
+            step_entry["key"] = str(s["key"])[:50]
+        if obs:
+            step_entry["observation"] = obs
+        if thought:
+            step_entry["thought"] = thought
+        if err:
+            step_entry["error"] = err
+        if s.get("evidence"):
+            step_entry["evidence"] = str(s["evidence"])[:300]
+        if s.get("check_results"):
+            step_entry["check_results"] = s["check_results"]
+        clean_steps.append(step_entry)
+    return clean_steps
+
+
+def extract_execution_details(res: Any) -> dict[str, Any]:
+    """Extract and sanitize execution details (steps, duration, screenshot, evidence)."""
+    if not res:
+        return {
+            "steps": [],
+            "duration_seconds": None,
+            "screenshot_path": None,
+            "evidence": None,
+            "final_observation": None,
+            "check_results": [],
+        }
+    steps = getattr(res, "steps", None) or []
+    sanitized = sanitize_step_timeline(steps)
+    evidence = None
+    final_obs = None
+    check_results = []
+
+    for s in reversed(steps):
+        if s.get("check_results") and not check_results:
+            check_results = s.get("check_results")
+        if s.get("evidence") and not evidence:
+            evidence = s.get("evidence")
+        if s.get("action") == "finish" and s.get("observation") and not final_obs:
+            final_obs = s.get("observation")
+        elif s.get("action") == "loop_detected" and s.get("observation") and not final_obs:
+            final_obs = s.get("observation")
+
+    err = getattr(res, "error_message", None)
+    if not final_obs and err:
+        final_obs = err
+
+    return {
+        "steps": sanitized,
+        "duration_seconds": getattr(res, "duration_seconds", None),
+        "screenshot_path": getattr(res, "screenshot_path", None),
+        "evidence": evidence,
+        "final_observation": final_obs,
+        "check_results": check_results,
+    }
+
+
 # Pydantic schemas
 class TestResultResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -42,6 +126,9 @@ class TestResultResponse(BaseModel):
     steps: Optional[list[dict[str, Any]]] = None
     duration_seconds: Optional[float] = None
     screenshot_path: Optional[str] = None
+    evidence: Optional[str] = None
+    final_observation: Optional[str] = None
+    check_results: Optional[list[dict[str, Any]]] = None
 
 
 class TestCaseResponse(BaseModel):
@@ -55,6 +142,14 @@ class TestCaseResponse(BaseModel):
     status: str
     order_index: int
     error_message: Optional[str] = None
+    test_key: Optional[str] = None
+    checks: Optional[list[dict[str, Any]]] = None
+    check_results: Optional[list[dict[str, Any]]] = None
+    steps: Optional[list[dict[str, Any]]] = None
+    duration_seconds: Optional[float] = None
+    screenshot_path: Optional[str] = None
+    evidence: Optional[str] = None
+    final_observation: Optional[str] = None
 
 
 class RunDetailResponse(BaseModel):
@@ -206,8 +301,25 @@ async def get_test_run(
 
     for tc in run.test_cases:
         res = tc.results[0] if tc.results else None
+        details = extract_execution_details(res)
+
         if tc.results:
-            all_results.extend(tc.results)
+            for r in tc.results:
+                r_details = extract_execution_details(r)
+                all_results.append(
+                    TestResultResponse(
+                        id=r.id,
+                        test_case_id=r.test_case_id,
+                        status=r.status,
+                        error_message=r.error_message,
+                        steps=r_details["steps"],
+                        duration_seconds=r_details["duration_seconds"],
+                        screenshot_path=r_details["screenshot_path"],
+                        evidence=r_details["evidence"],
+                        final_observation=r_details["final_observation"],
+                        check_results=r_details["check_results"],
+                    )
+                )
 
         st = res.status if res else tc.status
         err = (res.error_message if res else "") or ""
@@ -228,6 +340,7 @@ async def get_test_run(
             if run.status in ("COMPLETED", "FAILED", "CANCELLED"):
                 not_run_tests += 1
 
+        test_key = getattr(tc, "test_key", None) or f"TC-{tc.order_index + 1}"
         tc_responses.append(
             TestCaseResponse(
                 id=tc.id,
@@ -238,6 +351,14 @@ async def get_test_run(
                 status=st,
                 order_index=tc.order_index,
                 error_message=err if err else None,
+                test_key=test_key,
+                checks=getattr(tc, "checks", None) or [],
+                check_results=details["check_results"],
+                steps=details["steps"],
+                duration_seconds=details["duration_seconds"],
+                screenshot_path=details["screenshot_path"],
+                evidence=details["evidence"],
+                final_observation=details["final_observation"],
             )
         )
 
@@ -385,6 +506,7 @@ async def get_test_run_report(
     """Retrieve the generated test run report JSON."""
     stmt = (
         select(TestRun)
+        .options(selectinload(TestRun.test_cases).selectinload(TestCase.results))
         .join(Project, TestRun.project_id == Project.id)
         .where(TestRun.id == run_id, Project.user_id == user.id)
     )
@@ -401,7 +523,64 @@ async def get_test_run_report(
             detail="Report not yet generated for this run",
         )
 
-    return run.report
+    rep = dict(run.report)
+
+    # Normalize failures expected / observed keys
+    if "failures" in rep and isinstance(rep["failures"], list):
+        for f in rep["failures"]:
+            if "expected" not in f and "expected_behavior" in f:
+                f["expected"] = f["expected_behavior"]
+            if "expected_behavior" not in f and "expected" in f:
+                f["expected_behavior"] = f["expected"]
+            if "observed" not in f and "observed_behavior" in f:
+                f["observed"] = f["observed_behavior"]
+            if "observed_behavior" not in f and "observed" in f:
+                f["observed_behavior"] = f["observed"]
+
+    # Ensure test_cases and results are populated
+    missing_tcs = "test_cases" not in rep or not rep["test_cases"]
+    missing_res = "results" not in rep or not rep["results"]
+    if missing_tcs or missing_res:
+        tc_list = []
+        res_list = []
+        for tc in run.test_cases:
+            res = tc.results[0] if tc.results else None
+            details = extract_execution_details(res)
+            test_key = getattr(tc, "test_key", None) or f"TC-{tc.order_index + 1}"
+            tc_list.append({
+                "id": str(tc.id),
+                "title": tc.title,
+                "description": tc.description,
+                "source_requirement": tc.source_requirement,
+                "target_role": tc.target_role,
+                "status": res.status if res else tc.status,
+                "order_index": tc.order_index,
+                "test_key": test_key,
+                "checks": getattr(tc, "checks", None) or [],
+                "check_results": details["check_results"],
+                "steps": details["steps"],
+                "duration_seconds": details["duration_seconds"],
+                "screenshot_path": details["screenshot_path"],
+                "evidence": details["evidence"],
+                "final_observation": details["final_observation"],
+            })
+            if res:
+                res_list.append({
+                    "id": str(res.id),
+                    "test_case_id": str(res.test_case_id),
+                    "status": res.status,
+                    "error_message": res.error_message,
+                    "steps": details["steps"],
+                    "duration_seconds": details["duration_seconds"],
+                    "screenshot_path": details["screenshot_path"],
+                    "evidence": details["evidence"],
+                    "final_observation": details["final_observation"],
+                    "check_results": details["check_results"],
+                })
+        rep["test_cases"] = tc_list
+        rep["results"] = res_list
+
+    return rep
 
 
 @router.get("/runs/{run_id}/screenshots/{filename}")

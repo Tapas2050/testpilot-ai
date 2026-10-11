@@ -64,5 +64,7 @@ def generate_run_report(
         "classification_breakdown": classification_counts,
         "severity_breakdown": severity_counts,
         "failures": failures,
+        "test_cases": test_cases,
+        "results": results,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }

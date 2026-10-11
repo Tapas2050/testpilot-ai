@@ -674,7 +674,20 @@ async def report_node(state: AgentState) -> dict[str, Any]:
     async with session_factory() as session:
         tc_stmt = select(TestCase).where(TestCase.run_id == run_id).order_by(TestCase.order_index)
         tcs = (await session.execute(tc_stmt)).scalars().all()
-        tcs_data = [{"id": str(tc.id), "status": tc.status, "title": tc.title} for tc in tcs]
+        tcs_data = [
+            {
+                "id": str(tc.id),
+                "status": tc.status,
+                "title": tc.title,
+                "description": tc.description,
+                "source_requirement": tc.source_requirement,
+                "target_role": tc.target_role,
+                "order_index": tc.order_index,
+                "test_key": getattr(tc, "test_key", None) or f"TC-{tc.order_index + 1}",
+                "checks": getattr(tc, "checks", None) or [],
+            }
+            for tc in tcs
+        ]
 
         res_stmt = (
             select(TestResult)
@@ -682,7 +695,18 @@ async def report_node(state: AgentState) -> dict[str, Any]:
             .where(TestCase.run_id == run_id)
         )
         results = (await session.execute(res_stmt)).scalars().all()
-        results_data = [{"status": r.status, "test_case_id": str(r.test_case_id)} for r in results]
+        results_data = [
+            {
+                "id": str(r.id),
+                "status": r.status,
+                "test_case_id": str(r.test_case_id),
+                "duration_seconds": r.duration_seconds,
+                "screenshot_path": r.screenshot_path,
+                "error_message": r.error_message,
+                "steps": r.steps,
+            }
+            for r in results
+        ]
 
     report_data = generate_run_report(
         test_cases=tcs_data,

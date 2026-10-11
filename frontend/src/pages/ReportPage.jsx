@@ -5,12 +5,30 @@ import { ScreenshotViewer } from '../components/ScreenshotViewer';
 import { Banner } from '../components/Banner';
 import { getSeverityStyle } from '../utils/statusStyles';
 
+const ACTION_BADGES = {
+  click: { bg: '#E0F2FE', text: '#0369A1' },
+  fill: { bg: '#FEF3C7', text: '#B45309' },
+  navigate: { bg: '#F3E8FF', text: '#6B21A8' },
+  press_key: { bg: '#EDE9FE', text: '#5B21B6' },
+  select: { bg: '#CCFBF1', text: '#0F766E' },
+  finish: { bg: '#DCFCE7', text: '#15803D' },
+  login: { bg: '#FEE2E2', text: '#B91C1C' },
+  loop_detected: { bg: '#FEE2E2', text: '#B91C1C' },
+};
+
+function getActionBadgeStyle(action) {
+  const key = (action || '').toLowerCase();
+  return ACTION_BADGES[key] || { bg: '#F1F5F9', text: '#475569' };
+}
+
 export function ReportPage() {
   const { id: runId } = useParams();
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showPassedTests, setShowPassedTests] = useState(false);
+  const [expandedFailureIds, setExpandedFailureIds] = useState({});
+  const [expandedPassedIds, setExpandedPassedIds] = useState({});
 
   useEffect(() => {
     let active = true;
@@ -268,16 +286,36 @@ export function ReportPage() {
                 const sevStyle = getSeverityStyle(f.severity);
 
                 // Find matching test case and result for title and evidence screenshots
-                const matchedResult = results.find((r) => r.id === f.test_result_id);
-                const matchedTestCase = matchedResult
-                  ? test_cases.find((tc) => tc.id === matchedResult.test_case_id)
-                  : null;
+                const matchedResult = results.find(
+                  (r) =>
+                    (f.test_case_id && (r.test_case_id === f.test_case_id || r.id === f.test_case_id)) ||
+                    (f.test_result_id && r.id === f.test_result_id)
+                );
+                const matchedTestCase = test_cases.find(
+                  (tc) =>
+                    (f.test_case_id && tc.id === f.test_case_id) ||
+                    (matchedResult && tc.id === matchedResult.test_case_id)
+                );
 
                 const evidencePaths = matchedResult?.evidence_paths || [];
+                const screenshotPath =
+                  f.screenshot_path ||
+                  matchedResult?.screenshot_path ||
+                  matchedTestCase?.screenshot_path ||
+                  (evidencePaths.length > 0 ? evidencePaths[0] : null);
+
+                const cardId = f.id || idx;
+                const isExpanded = !!expandedFailureIds[cardId];
+                const execSteps = matchedResult?.steps || matchedTestCase?.steps || [];
+                const duration = matchedResult?.duration_seconds ?? matchedTestCase?.duration_seconds;
+                const finalObs = matchedResult?.final_observation || f.final_observation || f.observed || f.observed_behavior;
+                const evidenceQuote = matchedResult?.evidence || f.evidence || matchedTestCase?.evidence;
+                const checks = matchedTestCase?.checks || f.checks || [];
+                const checkResults = matchedResult?.check_results || f.check_results || [];
 
                 return (
                   <div
-                    key={f.id || idx}
+                    key={cardId}
                     data-testid="failure-card"
                     style={{
                       border: '1px solid #E2E8F0',
@@ -332,7 +370,7 @@ export function ReportPage() {
 
                       {matchedTestCase && (
                         <span style={{ fontFamily: 'monospace', fontSize: '12px', color: '#4F46E5', fontWeight: 600 }}>
-                          {matchedTestCase.test_key}: {matchedTestCase.title}
+                          {matchedTestCase.test_key || 'TC'}: {matchedTestCase.title}
                         </span>
                       )}
                     </div>
@@ -342,13 +380,13 @@ export function ReportPage() {
                         <strong style={{ color: '#166534', display: 'block', marginBottom: '4px' }}>
                           Expected Behavior:
                         </strong>
-                        <span style={{ color: '#334155' }}>{f.expected_behavior}</span>
+                        <span style={{ color: '#334155' }}>{f.expected || f.expected_behavior}</span>
                       </div>
                       <div style={{ backgroundColor: '#FEF2F2', padding: '12px', borderRadius: '6px', fontSize: '13px' }}>
                         <strong style={{ color: '#991B1B', display: 'block', marginBottom: '4px' }}>
                           Observed Behavior:
                         </strong>
-                        <span style={{ color: '#7F1D1D' }}>{f.observed_behavior}</span>
+                        <span style={{ color: '#7F1D1D' }}>{f.observed || f.observed_behavior}</span>
                       </div>
                     </div>
 
@@ -375,26 +413,217 @@ export function ReportPage() {
                       </div>
                     )}
 
-                    {evidencePaths.length > 0 && (
-                      <div style={{ marginTop: '12px' }}>
+                    {screenshotPath && (
+                      <div style={{ marginTop: '12px', marginBottom: '12px' }}>
                         <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '6px' }}>
                           Evidence Screenshots:
                         </div>
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                          {evidencePaths.map((p, pIdx) => {
-                            const filename = p.split(/[\\/]/).pop();
-                            return (
-                              <ScreenshotViewer
-                                key={pIdx}
-                                runId={runId}
-                                filename={filename}
-                                caption={`Failure Evidence ${f.classification}`}
-                              />
-                            );
-                          })}
+                          <ScreenshotViewer
+                            runId={runId}
+                            filename={screenshotPath.split(/[\\/]/).pop()}
+                            caption={`Failure Evidence ${f.classification}`}
+                          />
                         </div>
                       </div>
                     )}
+
+                    {/* Expandable Execution Details Toggle */}
+                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid #F1F5F9' }}>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedFailureIds((prev) => ({ ...prev, [cardId]: !prev[cardId] }))}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#4F46E5',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          padding: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span>{isExpanded ? 'Hide Execution Details ▲' : 'Show Execution Details ▼'}</span>
+                        {duration !== null && duration !== undefined && (
+                          <span style={{ color: '#64748B', fontWeight: 400, fontSize: '12px' }}>
+                            ({duration.toFixed(1)}s)
+                          </span>
+                        )}
+                      </button>
+
+                      {isExpanded && (
+                        <div
+                          style={{
+                            marginTop: '12px',
+                            padding: '14px',
+                            backgroundColor: '#F8FAFC',
+                            borderRadius: '6px',
+                            border: '1px solid #E2E8F0',
+                          }}
+                        >
+                          {/* Requirement Checks */}
+                          {checks && checks.length > 0 && (
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ fontWeight: 600, color: '#334155', fontSize: '12px', marginBottom: '6px' }}>
+                                Requirement Checks:
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {checks.map((chk, cIdx) => {
+                                  const chkRes = checkResults.find((cr) => cr.check_id === chk.check_id);
+                                  const chkStatus = chkRes?.result || 'PENDING';
+                                  return (
+                                    <div
+                                      key={chk.check_id || cIdx}
+                                      style={{
+                                        padding: '6px 10px',
+                                        backgroundColor: '#FFFFFF',
+                                        border: '1px solid #E2E8F0',
+                                        borderRadius: '4px',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        fontSize: '12px',
+                                      }}
+                                    >
+                                      <span>{chk.description || chk.check_id}</span>
+                                      <span
+                                        style={{
+                                          padding: '1px 6px',
+                                          borderRadius: '3px',
+                                          fontSize: '11px',
+                                          fontWeight: 700,
+                                          backgroundColor: chkStatus === 'PASSED' ? '#DCFCE7' : '#FEE2E2',
+                                          color: chkStatus === 'PASSED' ? '#166534' : '#991B1B',
+                                        }}
+                                      >
+                                        {chkStatus}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {finalObs && (
+                            <div style={{ marginBottom: '8px', color: '#334155', fontSize: '13px' }}>
+                              <strong>Final Observation: </strong> {finalObs}
+                            </div>
+                          )}
+
+                          {evidenceQuote && (
+                            <div style={{ marginBottom: '8px', color: '#334155', fontSize: '13px' }}>
+                              <strong>Evidence Quote: </strong> <em>"{evidenceQuote}"</em>
+                            </div>
+                          )}
+
+                          {/* Step Timeline */}
+                          {execSteps && execSteps.length > 0 ? (
+                            <div style={{ marginTop: '10px' }}>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '6px' }}>
+                                Step Timeline ({execSteps.length} steps):
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {execSteps.map((step, sIdx) => {
+                                  const act = step.action || step.tool || 'action';
+                                  const badge = getActionBadgeStyle(act);
+                                  const obsText = (
+                                    step.observation ||
+                                    step.thought ||
+                                    step.error ||
+                                    (step.arguments ? JSON.stringify(step.arguments) : '')
+                                  ).slice(0, 300);
+                                  return (
+                                    <div
+                                      key={sIdx}
+                                      data-testid="step-timeline-item"
+                                      style={{
+                                        padding: '8px 12px',
+                                        backgroundColor: '#FFFFFF',
+                                        border: '1px solid #E2E8F0',
+                                        borderRadius: '6px',
+                                        fontSize: '12px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '3px',
+                                      }}
+                                    >
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                        <span style={{ fontWeight: 600, color: '#334155' }}>
+                                          Step {step.step || sIdx + 1}:
+                                        </span>
+                                        <span
+                                          style={{
+                                            padding: '2px 8px',
+                                            borderRadius: '4px',
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            backgroundColor: badge.bg,
+                                            color: badge.text,
+                                          }}
+                                        >
+                                          {act}
+                                        </span>
+                                        {(step.selector || step.url) && (
+                                          <code
+                                            style={{
+                                              fontSize: '11px',
+                                              color: '#4F46E5',
+                                              backgroundColor: '#EEF2FF',
+                                              padding: '1px 6px',
+                                              borderRadius: '3px',
+                                            }}
+                                          >
+                                            {step.selector || step.url}
+                                          </code>
+                                        )}
+                                      </div>
+                                      {obsText && (
+                                        <div style={{ color: '#475569', fontSize: '12px', lineHeight: 1.4 }}>
+                                          {obsText}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              data-testid="no-steps-message"
+                              style={{
+                                marginTop: '8px',
+                                padding: '10px 12px',
+                                backgroundColor: '#FFFFFF',
+                                border: '1px solid #E2E8F0',
+                                borderRadius: '6px',
+                                color: '#64748B',
+                                fontSize: '13px',
+                              }}
+                            >
+                              No steps recorded for this test ({f.explanation || matchedResult?.error_message || 'scenario concluded without recorded steps'}).
+                            </div>
+                          )}
+
+                          {/* Screenshot */}
+                          {screenshotPath && (
+                            <div style={{ marginTop: '12px' }}>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '6px' }}>
+                                Screenshot Evidence:
+                              </div>
+                              <ScreenshotViewer
+                                runId={runId}
+                                filename={screenshotPath.split(/[\\/]/).pop()}
+                                caption={`Failure Evidence ${f.classification}`}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -426,38 +655,189 @@ export function ReportPage() {
 
             {showPassedTests && (
               <div style={{ padding: '0 20px', backgroundColor: '#FFFFFF' }}>
-                {passedCases.map((tc) => (
-                  <div
-                    key={tc.id}
-                    style={{
-                      padding: '12px 0',
-                      borderBottom: '1px solid #F1F5F9',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: '13px',
-                    }}
-                  >
-                    <div>
-                      <span style={{ fontFamily: 'monospace', color: '#4F46E5', marginRight: '8px' }}>
-                        {tc.test_key}
-                      </span>
-                      <span>{tc.title}</span>
-                    </div>
-                    <span
+                {passedCases.map((tc) => {
+                  const res = results.find((r) => r.test_case_id === tc.id || r.id === tc.id);
+                  const isExpanded = !!expandedPassedIds[tc.id];
+                  const execSteps = res?.steps || tc.steps || [];
+                  const duration = res?.duration_seconds ?? tc.duration_seconds;
+                  const finalObs = res?.final_observation || tc.final_observation;
+                  const evidenceQuote = res?.evidence || tc.evidence;
+                  const ssPath = res?.screenshot_path || tc.screenshot_path;
+                  const checks = tc.checks || [];
+                  const checkResults = res?.check_results || tc.check_results || [];
+
+                  return (
+                    <div
+                      key={tc.id}
                       style={{
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        backgroundColor: '#DCFCE7',
-                        color: '#166534',
-                        fontSize: '11px',
-                        fontWeight: 600,
+                        padding: '12px 0',
+                        borderBottom: '1px solid #F1F5F9',
+                        fontSize: '13px',
                       }}
                     >
-                      PASSED
-                    </span>
-                  </div>
-                ))}
+                      <div
+                        onClick={() => setExpandedPassedIds((prev) => ({ ...prev, [tc.id]: !prev[tc.id] }))}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div>
+                          <span style={{ fontFamily: 'monospace', color: '#4F46E5', marginRight: '8px' }}>
+                            {tc.test_key || 'TC'}
+                          </span>
+                          <span style={{ fontWeight: 500 }}>{tc.title}</span>
+                          {duration !== null && duration !== undefined && (
+                            <span style={{ marginLeft: '10px', color: '#64748B', fontSize: '12px' }}>
+                              ({duration.toFixed(1)}s)
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            style={{
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              backgroundColor: '#DCFCE7',
+                              color: '#166534',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                            }}
+                          >
+                            PASSED
+                          </span>
+                          <span style={{ color: '#94A3B8', fontSize: '11px' }}>
+                            {isExpanded ? '▲' : '▼'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div
+                          style={{
+                            marginTop: '10px',
+                            padding: '12px',
+                            backgroundColor: '#F8FAFC',
+                            borderRadius: '6px',
+                            border: '1px solid #E2E8F0',
+                          }}
+                        >
+                          {checks && checks.length > 0 && (
+                            <div style={{ marginBottom: '10px' }}>
+                              <div style={{ fontWeight: 600, color: '#334155', fontSize: '12px', marginBottom: '4px' }}>
+                                Requirement Checks:
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {checks.map((chk, cIdx) => {
+                                  const chkRes = checkResults.find((cr) => cr.check_id === chk.check_id);
+                                  const chkStatus = chkRes?.result || 'PASSED';
+                                  return (
+                                    <div
+                                      key={chk.check_id || cIdx}
+                                      style={{
+                                        padding: '4px 8px',
+                                        backgroundColor: '#FFFFFF',
+                                        border: '1px solid #E2E8F0',
+                                        borderRadius: '4px',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        fontSize: '12px',
+                                      }}
+                                    >
+                                      <span>{chk.description || chk.check_id}</span>
+                                      <span style={{ color: '#166534', fontWeight: 600 }}>{chkStatus}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {finalObs && (
+                            <div style={{ marginBottom: '6px', color: '#334155' }}>
+                              <strong>Final Observation: </strong> {finalObs}
+                            </div>
+                          )}
+                          {evidenceQuote && (
+                            <div style={{ marginBottom: '6px', color: '#334155' }}>
+                              <strong>Evidence Quote: </strong> <em>"{evidenceQuote}"</em>
+                            </div>
+                          )}
+
+                          {execSteps && execSteps.length > 0 ? (
+                            <div style={{ marginTop: '8px' }}>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '4px' }}>
+                                Step Timeline ({execSteps.length} steps):
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {execSteps.map((step, sIdx) => {
+                                  const act = step.action || step.tool || 'action';
+                                  const badge = getActionBadgeStyle(act);
+                                  const obs = (step.observation || step.thought || '').slice(0, 300);
+                                  return (
+                                    <div
+                                      key={sIdx}
+                                      style={{
+                                        padding: '6px 10px',
+                                        backgroundColor: '#FFFFFF',
+                                        border: '1px solid #E2E8F0',
+                                        borderRadius: '4px',
+                                        fontSize: '12px',
+                                      }}
+                                    >
+                                      <span style={{ fontWeight: 600 }}>Step {step.step || sIdx + 1}: </span>
+                                      <span
+                                        style={{
+                                          padding: '1px 6px',
+                                          borderRadius: '3px',
+                                          backgroundColor: badge.bg,
+                                          color: badge.text,
+                                          fontSize: '11px',
+                                          fontWeight: 600,
+                                          marginRight: '6px',
+                                        }}
+                                      >
+                                        {act}
+                                      </span>
+                                      {(step.selector || step.url) && (
+                                        <code style={{ fontSize: '11px', color: '#4F46E5', marginRight: '6px' }}>
+                                          {step.selector || step.url}
+                                        </code>
+                                      )}
+                                      {obs && <span style={{ color: '#64748B' }}>{obs}</span>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              data-testid="no-steps-message"
+                              style={{ color: '#64748B', fontSize: '12px', padding: '6px 0' }}
+                            >
+                              No steps recorded for this test.
+                            </div>
+                          )}
+
+                          {ssPath && (
+                            <div style={{ marginTop: '10px' }}>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '4px' }}>
+                                Screenshot Evidence:
+                              </div>
+                              <ScreenshotViewer
+                                runId={runId}
+                                filename={ssPath.split(/[\\/]/).pop()}
+                                caption={`Evidence for ${tc.title}`}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>
