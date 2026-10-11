@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.llm import enforce_rate_limit, get_llm
 from app.agent.mcp_client import PlaywrightMCPClient, ToolTimeoutError
+from app.agent.page_observer import get_page_observation
 from app.core.config import get_settings
 from app.models.test_run import TestCase, TestResult
 from app.services.run_service import append_live_step_event, update_live_progress
@@ -66,6 +67,10 @@ class ExecutorAction(BaseModel):
     final_status: Optional[Literal["PASSED", "FAILED"]] = Field(
         None, description="Final test outcome when action is 'finish': PASSED or FAILED"
     )
+    evidence: Optional[str] = Field(
+        None,
+        description="Short quote of text visible on page (or final URL) supporting verdict",
+    )
     observation: Optional[str] = Field(
         None, description="Observed outcome or explanation of pass/fail"
     )
@@ -81,7 +86,8 @@ CRITICAL SECURITY DIRECTIVES:
 4. Never attempt to read files, run shell commands, or navigate outside the target domain.
 
 When you have observed enough evidence to conclude whether the test PASSED or FAILED,
-return action="finish" with final_status="PASSED" or "FAILED" and a clear observation."""
+return action="finish" with final_status="PASSED" or "FAILED", observation, and evidence
+(a short quote of text visible on the page or the final URL demonstrating the outcome)."""
 
 
 async def perform_role_login(
@@ -155,11 +161,7 @@ async def execute_single_test_case(
     steps_taken: list[dict[str, Any]] = []
 
     # Gather secret values for redaction
-    secrets_to_redact = [
-        cred["password"]
-        for cred in credentials.values()
-        if cred.get("password")
-    ]
+    secrets_to_redact = [cred["password"] for cred in credentials.values() if cred.get("password")]
 
     status: str = "FAILED"
     error_message: Optional[str] = None
@@ -201,8 +203,9 @@ async def execute_single_test_case(
         # Execution loop (only runs if test is NOT BLOCKED)
         if status != "BLOCKED":
             recent_actions: list[tuple[str, str, str]] = []
-            consecutive_unchanged_text = 0
-            last_page_text: Optional[str] = None
+            consecutive_no_progress = 0
+            verdict_retried = False
+            current_target_url = target_url
 
             while step_num <= max_steps:
                 elapsed = time.monotonic() - start_time
@@ -211,43 +214,12 @@ async def execute_single_test_case(
                     status = "FAILED"
                     break
 
-                # 1. Fetch current visible page state
-                text_res = await mcp_client.call_tool("playwright_get_visible_text", {})
-                raw_text = ""
-                if isinstance(text_res, dict):
-                    raw_text = text_res.get("text", "") or str(text_res.get("content", ""))
-                # Truncate page text payload to keep payload small per D-004
-                page_text = raw_text[:1000]
-
-                # Loop detection: 4 consecutive steps of unchanged page text
-                if last_page_text is not None and page_text.strip() == last_page_text.strip():
-                    consecutive_unchanged_text += 1
-                else:
-                    consecutive_unchanged_text = 1
-                    last_page_text = page_text
-
-                if consecutive_unchanged_text >= 4:
-                    error_message = (
-                        "Execution loop detected: visible page text "
-                        "unchanged for 4 consecutive steps"
-                    )
-                    status = "FAILED"
-                    loop_step = {
-                        "step": step_num,
-                        "action": "loop_detected",
-                        "status": "FAILED",
-                        "observation": error_message,
-                    }
-                    steps_taken.append(loop_step)
-                    clean_loop = sanitize_steps([loop_step], secrets_to_redact)[0]
-                    logger.info(
-                        "[run_id=%s] Step %d executed: action=loop_detected, status=FAILED",
-                        run_id,
-                        step_num,
-                    )
-                    await append_live_step_event(run_id, clean_loop)
-                    await update_live_progress(run_id, current_step=step_num)
-                    break
+                # 1. Fetch current compact visible page state and interactive elements (Part 6a)
+                obs = await get_page_observation(
+                    mcp_client=mcp_client,
+                    current_url=current_target_url,
+                    max_text_chars=3000,
+                )
 
                 # 2. Formulate prompt for Executor LLM
                 history_desc = "\n".join(
@@ -258,6 +230,19 @@ async def execute_single_test_case(
                 if not history_desc:
                     history_desc = "(No previous steps)"
 
+                warning_line = ""
+                if consecutive_no_progress >= 2:
+                    warning_line = (
+                        "\nWARNING: Your last two actions had no visible effect; "
+                        "try a different approach or finish.\n"
+                    )
+
+                elements_text = (
+                    "\n".join(f"- {el}" for el in obs.interactive_elements)
+                    if obs.interactive_elements
+                    else "(None detected)"
+                )
+
                 prompt_content = f"""Test Objective:
 Title: {test_case.title}
 Description: {test_case.description}
@@ -267,10 +252,16 @@ Target URL: {target_url}
 
 Previous Steps:
 {history_desc}
-
+{warning_line}
 Current Browser Page State:
+URL: {obs.url}
+Title: {obs.title}
+
+Interactive Elements:
+{elements_text}
+
 <untrusted_page_content>
-{page_text}
+{obs.visible_text}
 </untrusted_page_content>
 
 Decide the next browser action to execute the test scenario, or finish if the result is known."""
@@ -311,9 +302,11 @@ Decide the next browser action to execute the test scenario, or finish if the re
                         action="finish",
                         final_status="PASSED",
                         observation="Mock test completed successfully",
+                        evidence=obs.visible_text[:40] if obs.visible_text else obs.url,
                     )
 
-                # Loop detection: same action on same selector with same value 3 times in a row
+                # Loop detection (Part 5a):
+                # Same action on same selector with same value 3 times in a row
                 action_key = (
                     str(decision.action or ""),
                     str(decision.selector or ""),
@@ -331,7 +324,7 @@ Decide the next browser action to execute the test scenario, or finish if the re
                     status = "FAILED"
                     loop_step = {
                         "step": step_num,
-                        "action": decision.action,
+                        "action": "loop_detected",
                         "selector": decision.selector,
                         "value": decision.value,
                         "status": "FAILED",
@@ -350,16 +343,102 @@ Decide the next browser action to execute the test scenario, or finish if the re
 
                 recent_actions.append(action_key)
 
-                # 3. Handle decision
+                # 3. Handle finish action and verify evidence (Part 6b)
                 if decision.action == "finish":
-                    status = decision.final_status or "PASSED"
-                    finish_step = {
-                        "step": step_num,
-                        "action": "finish",
-                        "status": status,
-                        "thought": decision.thought,
-                        "observation": decision.observation or "Test completed",
-                    }
+                    norm_text = " ".join(obs.visible_text.split()).lower()
+                    norm_url = obs.url.lower()
+
+                    if decision.final_status == "PASSED":
+                        evidence_val = decision.evidence
+                        is_valid_evidence = True
+                        if evidence_val is not None:
+                            norm_evidence = " ".join(evidence_val.split()).lower()
+                            if norm_evidence and (
+                                norm_evidence in norm_text or norm_evidence in norm_url
+                            ):
+                                is_valid_evidence = True
+                            else:
+                                is_valid_evidence = False
+
+                        if not is_valid_evidence and not verdict_retried:
+                            verdict_retried = True
+                            logger.warning(
+                                "[run_id=%s] PASSED verdict rejected: quote '%s' not on page",
+                                run_id,
+                                evidence_val,
+                            )
+                            # Re-prompt model once to correct evidence (Part 6b)
+                            correction_prompt = [
+                                SystemMessage(content=EXECUTOR_SYSTEM_PROMPT),
+                                HumanMessage(
+                                    content=(
+                                        f"Your verdict PASSED was rejected because the evidence "
+                                        f"quote '{evidence_val}' was not found in page text "
+                                        f"or current URL.\n\n"
+                                        f"Current URL: {obs.url}\n"
+                                        f"Visible Page Content:\n{obs.visible_text}\n\n"
+                                        f"Please return action='finish' with valid quote in "
+                                        f"'evidence' supporting PASSED, or conclude FAILED."
+                                    )
+                                ),
+                            ]
+                            try:
+                                retry_decision = await llm.ainvoke(correction_prompt)
+                                if (
+                                    isinstance(retry_decision, ExecutorAction)
+                                    and retry_decision.action == "finish"
+                                ):
+                                    decision = retry_decision
+                                    if decision.final_status == "PASSED":
+                                        retry_ev = decision.evidence
+                                        norm_rev = (
+                                            " ".join(retry_ev.split()).lower() if retry_ev else ""
+                                        )
+                                        if norm_rev and (
+                                            norm_rev in norm_text or norm_rev in norm_url
+                                        ):
+                                            is_valid_evidence = True
+                            except Exception:
+                                pass
+
+                        if not is_valid_evidence:
+                            status = "FAILED"
+                            error_message = "verdict not supported by page evidence"
+                            finish_step = {
+                                "step": step_num,
+                                "action": "finish",
+                                "status": "FAILED",
+                                "thought": decision.thought,
+                                "observation": "verdict not supported by page evidence",
+                                "evidence": decision.evidence,
+                            }
+                        else:
+                            status = "PASSED"
+                            finish_step = {
+                                "step": step_num,
+                                "action": "finish",
+                                "status": "PASSED",
+                                "thought": decision.thought,
+                                "observation": decision.observation or "Test completed",
+                                "evidence": decision.evidence,
+                            }
+                    else:
+                        status = "FAILED"
+                        observed_text = (
+                            decision.evidence
+                            or decision.observation
+                            or "Test completed with failure"
+                        )
+                        error_message = observed_text
+                        finish_step = {
+                            "step": step_num,
+                            "action": "finish",
+                            "status": "FAILED",
+                            "thought": decision.thought,
+                            "observation": observed_text,
+                            "evidence": decision.evidence,
+                        }
+
                     steps_taken.append(finish_step)
                     clean_finish = sanitize_steps([finish_step], secrets_to_redact)[0]
                     logger.info(
@@ -380,46 +459,96 @@ Decide the next browser action to execute the test scenario, or finish if the re
                     "status": "ok",
                 }
 
-                if decision.action == "navigate":
-                    dest_url = decision.url or target_url
-                    # Simple domain check to protect against SSRF redirect outside target
-                    if not dest_url.startswith(("http://", "https://", "/")):
-                        dest_url = target_url
-                    await mcp_client.call_tool(
-                        "playwright_navigate", {"url": dest_url, "headless": True}
+                tool_error = False
+                try:
+                    if decision.action == "navigate":
+                        dest_url = decision.url or target_url
+                        if not dest_url.startswith(("http://", "https://", "/")):
+                            dest_url = target_url
+                        nav_res = await mcp_client.call_tool(
+                            "playwright_navigate", {"url": dest_url, "headless": True}
+                        )
+                        if isinstance(nav_res, dict) and nav_res.get("isError"):
+                            tool_error = True
+                        current_target_url = dest_url
+                        step_entry["url"] = dest_url
+
+                    elif decision.action == "click":
+                        selector = decision.selector or "button"
+                        click_res = await mcp_client.call_tool(
+                            "playwright_click", {"selector": selector}
+                        )
+                        if isinstance(click_res, dict) and click_res.get("isError"):
+                            tool_error = True
+                        step_entry["selector"] = selector
+
+                    elif decision.action == "fill":
+                        selector = decision.selector or "input"
+                        val = decision.value or ""
+                        fill_res = await mcp_client.call_tool(
+                            "playwright_fill", {"selector": selector, "value": val}
+                        )
+                        if isinstance(fill_res, dict) and fill_res.get("isError"):
+                            tool_error = True
+                        step_entry["selector"] = selector
+                        step_entry["value"] = val
+
+                    elif decision.action == "select":
+                        selector = decision.selector or "select"
+                        val = decision.value or ""
+                        sel_res = await mcp_client.call_tool(
+                            "playwright_select", {"selector": selector, "value": val}
+                        )
+                        if isinstance(sel_res, dict) and sel_res.get("isError"):
+                            tool_error = True
+                        step_entry["selector"] = selector
+                        step_entry["value"] = val
+
+                    elif decision.action == "press_key":
+                        key = decision.key or "Enter"
+                        key_res = await mcp_client.call_tool(
+                            "playwright_press_key",
+                            {"key": key, "selector": decision.selector or ""},
+                        )
+                        if isinstance(key_res, dict) and key_res.get("isError"):
+                            tool_error = True
+                        step_entry["key"] = key
+                except Exception as tool_exc:
+                    tool_error = True
+                    step_entry["status"] = "error"
+                    step_entry["error"] = str(tool_exc)
+
+                # Progress tracking (Part 5b):
+                # A step counts as no-progress ONLY if it is click/navigate whose resulting
+                # page state is unchanged, or if tool returned an error.
+                # Fill steps do NOT count toward no-progress at all.
+                is_no_progress = False
+                if tool_error:
+                    is_no_progress = True
+                elif decision.action in ("click", "navigate"):
+                    new_obs = await get_page_observation(
+                        mcp_client=mcp_client,
+                        current_url=current_target_url,
+                        max_text_chars=3000,
                     )
-                    step_entry["url"] = dest_url
-
-                elif decision.action == "click":
-                    selector = decision.selector or "button"
-                    await mcp_client.call_tool("playwright_click", {"selector": selector})
-                    step_entry["selector"] = selector
-
+                    if new_obs.page_state_key == obs.page_state_key:
+                        is_no_progress = True
+                    else:
+                        is_no_progress = False
+                        obs = new_obs
                 elif decision.action == "fill":
-                    selector = decision.selector or "input"
-                    val = decision.value or ""
-                    await mcp_client.call_tool(
-                        "playwright_fill", {"selector": selector, "value": val}
-                    )
-                    step_entry["selector"] = selector
-                    step_entry["value"] = val
-
+                    # Fill steps never count toward no-progress
+                    is_no_progress = False
                 elif decision.action == "select":
-                    selector = decision.selector or "select"
-                    val = decision.value or ""
-                    await mcp_client.call_tool(
-                        "playwright_select", {"selector": selector, "value": val}
-                    )
-                    step_entry["selector"] = selector
-                    step_entry["value"] = val
+                    # Select with value counts as progress
+                    is_no_progress = False
+                else:
+                    is_no_progress = False
 
-                elif decision.action == "press_key":
-                    key = decision.key or "Enter"
-                    await mcp_client.call_tool(
-                        "playwright_press_key",
-                        {"key": key, "selector": decision.selector or ""},
-                    )
-                    step_entry["key"] = key
+                if is_no_progress:
+                    consecutive_no_progress += 1
+                else:
+                    consecutive_no_progress = 0
 
                 steps_taken.append(step_entry)
                 clean_step = sanitize_steps([step_entry], secrets_to_redact)[0]
@@ -432,6 +561,33 @@ Decide the next browser action to execute the test scenario, or finish if the re
                 )
                 await append_live_step_event(run_id, clean_step)
                 await update_live_progress(run_id, current_step=step_num)
+
+                # Check 6 consecutive no-progress steps (Part 5c)
+                if consecutive_no_progress >= 6:
+                    error_message = (
+                        f"Execution loop detected: 6 consecutive steps made no progress "
+                        f"(last action: '{decision.action}' on '{decision.selector}')"
+                    )
+                    status = "FAILED"
+                    loop_step = {
+                        "step": step_num + 1,
+                        "action": "loop_detected",
+                        "selector": decision.selector,
+                        "value": decision.value,
+                        "status": "FAILED",
+                        "observation": error_message,
+                    }
+                    steps_taken.append(loop_step)
+                    clean_loop = sanitize_steps([loop_step], secrets_to_redact)[0]
+                    logger.info(
+                        "[run_id=%s] Step %d executed: action=loop_detected, status=FAILED",
+                        run_id,
+                        step_num + 1,
+                    )
+                    await append_live_step_event(run_id, clean_loop)
+                    await update_live_progress(run_id, current_step=step_num + 1)
+                    break
+
                 step_num += 1
 
             else:

@@ -356,12 +356,118 @@ async def test_part3_repeating_action_detected_as_loop_fails_test(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_part3_unchanged_page_text_detected_as_loop_fails_test(tmp_path: Path):
-    """Part 3(d): Unchanged visible page text for 4 consecutive steps fails test."""
+async def test_part5_four_different_fills_and_submit_is_not_a_loop(tmp_path: Path):
+    """Part 5(f): A ticket-creation scenario with 4 fills followed by submit click
+    is NOT a loop.
+    """
     test_case = TestCase(
         id=uuid.uuid4(),
-        title="Unchanged page text loop test",
-        description="Verify 4 steps of unchanged text fails as loop",
+        title="Ticket creation form test",
+        description="Verify 4 fills followed by submit click is not a loop",
+        source_requirement="REQ-TKT-01",
+        target_role=None,
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+    client.set_mock_response(
+        "playwright_get_visible_text",
+        {"text": "Ticket #101 created successfully. Status: Open"},
+    )
+
+    steps = [
+        ExecutorAction(
+            thought="Fill title", action="fill", selector="#title", value="Printer broken"
+        ),
+        ExecutorAction(
+            thought="Fill desc", action="fill", selector="#description", value="Paper jam in tray 2"
+        ),
+        ExecutorAction(
+            thought="Fill category", action="fill", selector="#category", value="Hardware"
+        ),
+        ExecutorAction(thought="Fill priority", action="fill", selector="#priority", value="High"),
+        ExecutorAction(thought="Submit ticket", action="click", selector="#submit-btn"),
+        ExecutorAction(
+            thought="Verify creation",
+            action="finish",
+            final_status="PASSED",
+            evidence="Ticket #101 created successfully",
+        ),
+    ]
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=steps)
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001/tickets/new",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        assert result.status == "PASSED"
+        assert result.error_message is None
+        assert len(result.steps) == 6
+    finally:
+        set_mock_llm(None)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part5_three_identical_fills_is_a_loop(tmp_path: Path):
+    """Part 5(f): Three identical fills on same selector with same value is detected as a loop."""
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Three identical fills loop test",
+        description="Verify 3 identical fills fail as loop",
+        source_requirement="REQ-LOOP-01",
+        target_role=None,
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+
+    mock_llm = MagicMock()
+    mock_action = ExecutorAction(
+        thought="Fill subject repeatedly",
+        action="fill",
+        selector="#subject",
+        value="Network issue",
+    )
+    mock_llm.ainvoke = AsyncMock(return_value=mock_action)
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        assert result.status == "FAILED"
+        assert result.error_message is not None
+        assert "repeated 3 times in a row" in result.error_message
+        assert len(result.steps) == 3
+        assert mock_llm.ainvoke.call_count == 3
+    finally:
+        set_mock_llm(None)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part5_six_unchanged_clicks_is_a_loop(tmp_path: Path):
+    """Part 5(f): Six unchanged clicks whose page state does not progress fail as a loop."""
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Six unchanged clicks loop test",
+        description="Verify 6 consecutive no-progress clicks fail as loop",
         source_requirement="REQ-LOOP-02",
         target_role=None,
     )
@@ -375,10 +481,12 @@ async def test_part3_unchanged_page_text_detected_as_loop_fails_test(tmp_path: P
 
     mock_llm = MagicMock()
     call_count = 0
+    prompts_received = []
 
-    def mock_step(*args, **kwargs):
+    def mock_step(messages, *args, **kwargs):
         nonlocal call_count
         call_count += 1
+        prompts_received.append(messages[1].content)
         return ExecutorAction(
             thought=f"Click something different {call_count}",
             action="click",
@@ -400,10 +508,116 @@ async def test_part3_unchanged_page_text_detected_as_loop_fails_test(tmp_path: P
 
         assert result.status == "FAILED"
         assert result.error_message is not None
-        assert "visible page text unchanged for 4 consecutive steps" in result.error_message
-        # Should stop at step 4 without further LLM calls
-        assert mock_llm.ainvoke.call_count <= 4
+        assert "6 consecutive steps made no progress" in result.error_message
+        assert mock_llm.ainvoke.call_count == 6
+        # Part 5(d): Verify warning line was present in prompt after 2 no-progress steps
+        assert any(
+            "WARNING: Your last two actions had no visible effect" in prompt
+            for prompt in prompts_received[2:]
+        )
     finally:
         set_mock_llm(None)
         await client.close()
 
+
+@pytest.mark.asyncio
+async def test_part6_mocked_model_claiming_passed_with_quote_not_on_page_is_rejected(
+    tmp_path: Path,
+):
+    """Part 6(c): Mocked model claiming PASSED with a quote not on the page is rejected."""
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Unverified passed verdict test",
+        description="Verify claim with bogus quote is rejected",
+        source_requirement="REQ-VERDICT-01",
+        target_role=None,
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+    client.set_mock_response(
+        "playwright_get_visible_text",
+        {"text": "Actual page text: SupportDesk Dashboard with 5 open tickets"},
+    )
+
+    # First attempt returns invalid evidence; retry prompt also returns invalid evidence
+    first_action = ExecutorAction(
+        thought="Done",
+        action="finish",
+        final_status="PASSED",
+        evidence="NonExistentTextNotOnPage",
+    )
+    retry_action = ExecutorAction(
+        thought="Still claiming pass",
+        action="finish",
+        final_status="PASSED",
+        evidence="StillNotOnPageQuote",
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=[first_action, retry_action])
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        assert result.status == "FAILED"
+        assert result.error_message == "verdict not supported by page evidence"
+        assert mock_llm.ainvoke.call_count == 2
+    finally:
+        set_mock_llm(None)
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_part6_mocked_model_claiming_passed_with_valid_quote_is_accepted(tmp_path: Path):
+    """Part 6(c): Mocked model claiming PASSED with a valid quote on the page is accepted."""
+    test_case = TestCase(
+        id=uuid.uuid4(),
+        title="Verified passed verdict test",
+        description="Verify claim with valid quote is accepted",
+        source_requirement="REQ-VERDICT-02",
+        target_role=None,
+    )
+
+    client = PlaywrightMCPClient(is_mock=True)
+    await client.start()
+    client.set_mock_response(
+        "playwright_get_visible_text",
+        {"text": "SupportDesk Dashboard with 5 open tickets"},
+    )
+
+    valid_action = ExecutorAction(
+        thought="Found open tickets text",
+        action="finish",
+        final_status="PASSED",
+        evidence="5 open tickets",
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(return_value=valid_action)
+    set_mock_llm(mock_llm)
+
+    try:
+        result = await execute_single_test_case(
+            test_case=test_case,
+            target_url="http://localhost:8001",
+            credentials={},
+            mcp_client=client,
+            run_id=uuid.uuid4(),
+            storage_dir=tmp_path,
+        )
+
+        assert result.status == "PASSED"
+        assert result.error_message is None
+        assert mock_llm.ainvoke.call_count == 1
+    finally:
+        set_mock_llm(None)
+        await client.close()

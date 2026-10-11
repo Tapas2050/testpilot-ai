@@ -131,7 +131,7 @@ def sanitize_secret_values(text: Optional[str], secrets: Optional[list[str]] = N
     clean = re.sub(r"Bearer\s+[A-Za-z0-9_\-\.]+", "Bearer [REDACTED]", clean, flags=re.IGNORECASE)
 
     # 3. Scrub common API key patterns (Google AI Studio, OpenAI, etc.)
-    clean = re.sub(r"AIza[0-9A-Za-z_\-]{35}", "[REDACTED]", clean)
+    clean = re.sub(r"AIza[0-9A-Za-z_\-]{15,}", "[REDACTED]", clean)
     clean = re.sub(r"sk-[0-9A-Za-z_\-]{20,}", "[REDACTED]", clean)
 
     # 4. Scrub configured secrets from settings
@@ -222,4 +222,3 @@ def format_run_failure_message(
 
     test_part = f":{test_key}" if test_key else ""
     return f"[{stage}{test_part}] {exc_type}: {short_msg}"
-

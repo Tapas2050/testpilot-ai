@@ -46,6 +46,7 @@ async def check_cancellation(state: AgentState) -> bool:
 
 # --- Node Definitions ---
 
+
 async def plan_node(state: AgentState) -> dict[str, Any]:
     """Stub Planner node: Generates planned test cases."""
     run_id = uuid.UUID(state["run_id"])
@@ -199,11 +200,10 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
         stmt = select(TestCase).where(TestCase.run_id == run_id).order_by(TestCase.order_index)
         tcs = (await session.execute(stmt)).scalars().all()
 
-        await update_live_progress(
-            run_id, stage=stage, total_tests=len(tcs), completed_tests=0
-        )
+        await update_live_progress(run_id, stage=stage, total_tests=len(tcs), completed_tests=0)
 
         import os
+
         is_mock_mcp = state.get("is_mock_mcp", False) or bool(os.getenv("PYTEST_CURRENT_TEST"))
         # Avoid starting the browser tool twice: reuse client from preflight if alive
         mcp_client = _active_mcp_clients.get(run_id)
@@ -310,12 +310,9 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                     result.status,
                 )
 
-                is_env_failure = (
-                    result.status == "FAILED"
-                    and (
-                        "Environment failure" in (result.error_message or "")
-                        or "timed out" in (result.error_message or "").lower()
-                    )
+                is_env_failure = result.status == "FAILED" and (
+                    "Environment failure" in (result.error_message or "")
+                    or "timed out" in (result.error_message or "").lower()
                 )
                 if is_env_failure:
                     env_msg = result.error_message or "Tool timeout"
@@ -346,9 +343,8 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                     )
                     session.add(db_failure)
 
-                is_auth_failure = (
-                    result.status == "BLOCKED"
-                    and "Authentication failed" in (result.error_message or "")
+                is_auth_failure = result.status == "BLOCKED" and "Authentication failed" in (
+                    result.error_message or ""
                 )
                 if is_auth_failure:
                     consecutive_auth_failures += 1
@@ -382,12 +378,9 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                 else:
                     consecutive_auth_failures = 0
 
-                is_llm_failure = (
-                    result.status == "BLOCKED"
-                    and (
-                        "All LLM providers failed" in (result.error_message or "")
-                        or "LLM provider failure" in (result.error_message or "")
-                    )
+                is_llm_failure = result.status == "BLOCKED" and (
+                    "All LLM providers failed" in (result.error_message or "")
+                    or "LLM provider failure" in (result.error_message or "")
                 )
                 if is_llm_failure:
                     consecutive_llm_failures += 1
@@ -421,6 +414,30 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                 else:
                     consecutive_llm_failures = 0
 
+                is_loop_failure = result.status == "FAILED" and "Execution loop detected" in (
+                    result.error_message or ""
+                )
+                if is_loop_failure:
+                    db_failure = Failure(
+                        test_case_id=tc.id,
+                        classification="TEST_FAILURE",
+                        severity="MEDIUM",
+                        confidence=1.0,
+                        expected=(
+                            "Test execution makes progress without repeating identical "
+                            "actions or states"
+                        ),
+                        observed=result.error_message or "Execution loop detected",
+                        explanation=(
+                            f"Test stopped early due to execution loop: {result.error_message}"
+                        ),
+                        suggested_action=(
+                            "Review test steps and element selectors to ensure interaction "
+                            "makes progress."
+                        ),
+                    )
+                    session.add(db_failure)
+
                 await session.commit()
                 await update_live_progress(
                     run_id,
@@ -436,7 +453,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                         f"Please check the project's saved credentials in Project Settings."
                     )
                     # Mark remaining tests BLOCKED
-                    for remaining_tc in tcs[tc_idx + 1:]:
+                    for remaining_tc in tcs[tc_idx + 1 :]:
                         remaining_tc.status = "BLOCKED"
                         session.add(remaining_tc)
                         blocked_res = TestResult(
@@ -448,10 +465,12 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                             ),
                         )
                         session.add(blocked_res)
-                        results.append({
-                            "test_case_id": str(remaining_tc.id),
-                            "status": "BLOCKED",
-                        })
+                        results.append(
+                            {
+                                "test_case_id": str(remaining_tc.id),
+                                "status": "BLOCKED",
+                            }
+                        )
                     await session.commit()
                     break
 
@@ -463,7 +482,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                         "Please check LLM API keys, daily quotas, or provider service status."
                     )
                     # Mark remaining tests BLOCKED
-                    for remaining_tc in tcs[tc_idx + 1:]:
+                    for remaining_tc in tcs[tc_idx + 1 :]:
                         remaining_tc.status = "BLOCKED"
                         session.add(remaining_tc)
                         blocked_res = TestResult(
@@ -475,10 +494,12 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                             ),
                         )
                         session.add(blocked_res)
-                        results.append({
-                            "test_case_id": str(remaining_tc.id),
-                            "status": "BLOCKED",
-                        })
+                        results.append(
+                            {
+                                "test_case_id": str(remaining_tc.id),
+                                "status": "BLOCKED",
+                            }
+                        )
                     await session.commit()
                     break
 
@@ -539,6 +560,29 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
             steps = res.steps if res and res.steps else []
             err_msg = res.error_message if res else None
 
+            existing_fail = (
+                (await session.execute(select(Failure).where(Failure.test_case_id == tc.id)))
+                .scalars()
+                .first()
+            )
+            if existing_fail:
+                failures.append(
+                    {
+                        "test_case_id": str(tc.id),
+                        "title": tc.title,
+                        "source_requirement": tc.source_requirement,
+                        "classification": existing_fail.classification,
+                        "severity": existing_fail.severity,
+                        "confidence": existing_fail.confidence,
+                        "expected": existing_fail.expected,
+                        "observed": existing_fail.observed,
+                        "explanation": existing_fail.explanation,
+                        "suggested_action": existing_fail.suggested_action,
+                        "screenshot_path": res.screenshot_path if res else None,
+                    }
+                )
+                continue
+
             analysis = await analyze_test_failure(
                 title=tc.title,
                 description=tc.description,
@@ -560,19 +604,21 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
             )
             session.add(db_failure)
 
-            failures.append({
-                "test_case_id": str(tc.id),
-                "title": tc.title,
-                "source_requirement": tc.source_requirement,
-                "classification": analysis.classification,
-                "severity": analysis.severity,
-                "confidence": analysis.confidence,
-                "expected": analysis.expected,
-                "observed": analysis.observed,
-                "explanation": analysis.explanation,
-                "suggested_action": analysis.suggested_action,
-                "screenshot_path": res.screenshot_path if res else None,
-            })
+            failures.append(
+                {
+                    "test_case_id": str(tc.id),
+                    "title": tc.title,
+                    "source_requirement": tc.source_requirement,
+                    "classification": analysis.classification,
+                    "severity": analysis.severity,
+                    "confidence": analysis.confidence,
+                    "expected": analysis.expected,
+                    "observed": analysis.observed,
+                    "explanation": analysis.explanation,
+                    "suggested_action": analysis.suggested_action,
+                    "screenshot_path": res.screenshot_path if res else None,
+                }
+            )
 
         await session.commit()
 
@@ -640,9 +686,7 @@ async def complete_node(state: AgentState) -> dict[str, Any]:
     results = state.get("results", [])
     auth_aborted = state.get("auth_aborted", False)
     llm_aborted = state.get("llm_aborted", False)
-    all_blocked = bool(results) and all(
-        r.get("status") == "BLOCKED" for r in results
-    )
+    all_blocked = bool(results) and all(r.get("status") == "BLOCKED" for r in results)
 
     if auth_aborted or llm_aborted or all_blocked:
         status = "FAILED"
@@ -793,7 +837,7 @@ async def _finalize_run(
                     if final_status == "FAILED":
                         run.failed_stage = failed_stage or "QUEUED"
                     run.completed_at = now
-                    run.cancel_requested = (final_status == "CANCELLED")
+                    run.cancel_requested = final_status == "CANCELLED"
 
                 # Mark test cases that never finished as BLOCKED
                 tc_stmt = (
@@ -830,8 +874,7 @@ async def _finalize_run(
                     from app.agent.report import generate_run_report
 
                     tcs_data = [
-                        {"id": str(tc.id), "status": tc.status, "title": tc.title}
-                        for tc in tcs
+                        {"id": str(tc.id), "status": tc.status, "title": tc.title} for tc in tcs
                     ]
                     results_data = [
                         {"status": r.status, "test_case_id": str(r.test_case_id)}
@@ -952,12 +995,13 @@ async def execute_agent_run(
         await cache_run_status(run_id, status="preflight", stage="preflight")
 
         try:
+            injected_mcp = _active_mcp_clients.get(run_id)
             preflight_res = await run_preflight_checks(
                 project_id=project_id,
                 db_url=db_url,
-                run_id=run_id,
+                run_id=run_id if injected_mcp is None else None,
             )
-            if "mcp_client" in preflight_res and preflight_res["mcp_client"]:
+            if injected_mcp is None and preflight_res.get("mcp_client"):
                 _active_mcp_clients[run_id] = preflight_res["mcp_client"]
         except PreflightCheckError as p_exc:
             exit_status = "FAILED"
