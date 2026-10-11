@@ -90,3 +90,56 @@ async def test_real_deadline_exceeded_reported_correctly():
         final_call = mock_update_db.call_args_list[-1]
         err_msg = final_call.kwargs.get("error_message", "")
         assert "Run exceeded the time limit of 0.05 seconds" in err_msg
+
+
+def test_format_run_failure_message_empty_exception_message():
+    """Verify that an exception with an empty message never outputs empty parentheses."""
+    from app.core.security import format_exception_summary
+
+    exc = RuntimeError("")
+    msg = format_run_failure_message(stage="preflight", exc=exc)
+    assert "[preflight] RuntimeError:" in msg
+    assert "no detail" in msg
+    assert "()" not in msg
+
+    summary = format_exception_summary(exc)
+    assert summary == "RuntimeError: no detail"
+    assert "()" not in summary
+
+
+def test_format_run_failure_message_timeout():
+    """Verify timeout exception includes class name, elapsed time, budget and no empty parens."""
+    from app.core.security import format_exception_summary
+
+    exc = asyncio.TimeoutError()
+    summary = format_exception_summary(exc, elapsed=45.0, budget=45.0)
+    assert summary == "TimeoutError after 45.0s (budget 45s)"
+
+    msg = format_run_failure_message(stage="preflight", exc=exc)
+    assert "[preflight] TimeoutError:" in msg
+    assert "()" not in msg
+
+
+def test_format_run_failure_message_not_found_executable():
+    """Verify FileNotFoundError includes class name and clean message."""
+    from app.core.security import format_exception_summary
+
+    exc = FileNotFoundError("Node.exe not found on PATH")
+    summary = format_exception_summary(exc, elapsed=0.2, budget=5.0)
+    assert "FileNotFoundError after 0.2s (budget 5s): Node.exe not found on PATH" in summary
+
+    msg = format_run_failure_message(stage="preflight", exc=exc)
+    assert "[preflight] FileNotFoundError: Node.exe not found on PATH" in msg
+    assert "()" not in msg
+
+
+def test_format_run_failure_message_secret_inside_message():
+    """Verify secret inside exception message is sanitized properly."""
+    exc = RuntimeError(
+        "Authentication failed for key AIzaSyD9876543210zyx and password=MySecretPass!99"
+    )
+    msg = format_run_failure_message(stage="preflight", exc=exc, secrets=["MySecretPass!99"])
+    assert "AIzaSyD9876543210zyx" not in msg
+    assert "MySecretPass!99" not in msg
+    assert "[REDACTED]" in msg
+
