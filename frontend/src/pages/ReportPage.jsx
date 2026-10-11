@@ -192,8 +192,25 @@ export function ReportPage() {
             marginBottom: '28px',
           }}
         >
-          <div style={{ fontSize: '14px', fontWeight: 600, color: '#1E3A8A', marginBottom: '8px' }}>
-            AI Executive Summary
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#1E3A8A' }}>
+              AI Executive Summary
+            </div>
+            {report?.live_llm_calls !== undefined && (
+              <span
+                data-testid="live-llm-calls-badge"
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  backgroundColor: '#DBEAFE',
+                  color: '#1E40AF',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                }}
+              >
+                Live LLM Calls: {report.live_llm_calls}
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '14px', color: '#1E40AF', lineHeight: 1.6 }}>{summary}</div>
         </div>

@@ -720,6 +720,7 @@ async def report_node(state: AgentState) -> dict[str, Any]:
         test_cases=tcs_data,
         results=results_data,
         failures=state.get("failures", []),
+        live_llm_calls=get_live_call_count(),
     )
 
     await update_run_in_db(run_id, report=report_data, db_url=db_url)
@@ -936,7 +937,10 @@ async def _finalize_run(
                         for r in existing_results
                     ]
                     run.report = generate_run_report(
-                        test_cases=tcs_data, results=results_data, failures=[]
+                        test_cases=tcs_data,
+                        results=results_data,
+                        failures=[],
+                        live_llm_calls=get_live_call_count(),
                     )
 
                 session.add(run)

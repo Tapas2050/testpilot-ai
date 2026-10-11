@@ -128,6 +128,11 @@ In a new PowerShell terminal:
 cd backend
 uv run uvicorn app.main:app --port 8000
 ```
+Verify the API and dependencies are running via the health check endpoint:
+```powershell
+curl http://localhost:8000/health
+# Returns: {"status":"healthy","database":{"status":"healthy"},"redis":{"status":"healthy"}}
+```
 
 ### 5. Start Background Agent Worker
 

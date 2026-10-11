@@ -136,6 +136,16 @@ Phase 17 (Playwright MCP Startup Hardening, Resilient Preflight, and Single Brow
 - T17.4 Honest exception reporting & secret sanitization: Exception class name and elapsed time included in all failure messages; empty exception messages formatted as 'no detail'; zero empty parentheses `()`; secrets redacted.
 - T17.5 SentenceTransformer local loading: `local_files_only=True` avoids 18-20s unauthenticated Hugging Face Hub HTTP requests during model load.
 
+Phase 18 (Trustworthy Verdicts, Execution Details, Action Validation, and Ground-Truth Browser Checks)
+- T18.1 Execution Details Extraction: GET /runs/{id} and GET /runs/{id}/report return sanitized step timelines (<=300 chars observations, selector/url, action), per-check verdicts, final observations, evidence quotes, and screenshot paths. TestRunPage and ReportPage render expanded rows with checks, timeline, unknown action fallback, empty state messaging, and screenshot thumbnails via authenticated evidence endpoints.
+- T18.2 Deterministic Failure Construction: Failures always have non-empty expected (from expected_result) and observed (from final observation, evidence quote, last URL, text snippet). Analyst LLM schema validates non-empty classification, severity, confidence, root cause, suggested action, retrying once before falling back to deterministic explanation. Prompt explicitly distinguishes PRODUCT_BUG vs TEST_FAILURE and forbids 'update test script'.
+- T18.3 Planner Single-Role & Checks: Each planned test targets exactly 1 role and 1-4 UI checks. MAX_TESTS_PER_RUN default set to 12 based on measured executor calls (3.125 calls/test <= 6 limit). Quota math documented in D-039.
+- T18.4 Action Validation: Action validator rejects missing required fields (navigate: url, click: selector, fill/select: selector+value, press_key: key), triggers single re-prompt, without counting toward step limit.
+- T18.5 Per-Check Verdict Verification: Finish action returns check_results. PASSED checks must have evidence quotes verified against DOM text or URL. Negative checks must attempt the forbidden action and verify after-state evidence. Test verdict: PASSED only if all checks pass; FAILED if any fails; BLOCKED if any unverified/inconclusive.
+- T18.6 Demo Seed Data: SupportDesk seeded with 5 tickets (IDs 1-5) covering varying priorities, statuses, and assignees. Test data appendix added to SUPPORTDESK_REQUIREMENTS.md.
+- T18.7 Scripted Ground-Truth Browser Verification: test_ground_truth_browser.py runs scripted worker pipeline against real Playwright MCP server and real SupportDesk. Defects ON verifies 3 failures (agent cannot delete, high priority stored as Low, ID search returns nothing) and 4 passes. Defects OFF verifies all 7 pass. Clean process teardown verified.
+- T18.8 Metrics & Health Check: Live LLM calls counted and reported in summary and live_llm_calls field. Backend health route GET /health documented.
+
 ## 4. Agent Quality Metrics (record in MEMORY.md after each eval run)
 - Planned tests traceable to a requirement: target 100 percent
 - Planted defects found on the defective build: target 3 of 3
@@ -144,3 +154,4 @@ Phase 17 (Playwright MCP Startup Hardening, Resilient Preflight, and Single Brow
 
 ## 5. Exit Criteria for the MVP
 All phase tests pass; all PRD success criteria demonstrated; no credential found in any scan; demo script rehearsed.
+

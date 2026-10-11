@@ -145,8 +145,13 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] Part 2: Reliable MCP startup (cold-start budget 45s, automatic retry, single browser start handoff, RSS logging, local_files_only embedding load, D-037)
 - [x] Part 3: Honest error messages (exception class name, elapsed time, budget, hints, sanitized secret values, test cases)
 - [x] Part 4: Documentation and instructions cleanup (reconcile lock TTL, replace passwords with placeholders, update MEMORY.md, DECISIONS.md, TEST_PLAN.md, TASKS.md)
-- [ ] Part 5: Loop detection redesign (no-progress rule, 6-step limit, warning at 2 steps, legitimate form fill progress)
-- [ ] Part 6: Better page observation (compact interactive view) and evidence-supported verdicts
-- [ ] Part 7: Planner coverage (full chunks if <= 30, requirement ID coverage, observable expected results)
-- [ ] Part 8: Logging configuration and ground-truth check
+## Execution Details, Failure Fields, Trustworthy Verdicts, and Ground-Truth Verification
+- [x] Part 1: Diagnose run 85109bf4-7983-405b-baa6-b7074bb717e9, trace data path, field name mismatches, reproduce with failing tests
+- [x] Part 2: Show real execution details on TestRunPage and ReportPage (checks, timeline, observations, evidence quote, screenshot thumbnails, authenticated evidence endpoint)
+- [x] Part 3: Deterministic expected & observed failure fields, analyst retry with fallback, distinction between PRODUCT_BUG and TEST_FAILURE (no "update test script")
+- [x] Part 4: Planner single-role targeting, 1-4 checks per test, MAX_TESTS_PER_RUN=12 default based on measured 3.125 calls/test, quota math in D-039
+- [x] Part 5: Action validation before execution (re-prompt once), per-check finish action evidence verification, negative check after-state attempt verification, trustworthy test verdicts (PASSED/FAILED/BLOCKED)
+- [x] Part 6: Seed 5 realistic tickets in SupportDesk target, update requirements appendix, test seed and defect toggles
+- [x] Part 7: Scripted real-browser ground-truth check against SupportDesk on port 8001 (defects on and off), verified all 7 scenarios match ground-truth
+- [x] Part 8: Housekeeping (health check URL doc fix, Docker-free instructions, MEMORY/DECISIONS/TASKS/TEST_PLAN updates, total live LLM calls tracking in summary and UI)
 

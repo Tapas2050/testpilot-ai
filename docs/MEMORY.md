@@ -18,8 +18,8 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Playwright MCP Worker Startup Hardening & Resilient Preflight (Parts 1-4 Complete)
-- Status: Preflight cold-start tolerance (45s budget + retry), single browser launch handoff, honest error formatting, and test suites passing cleanly
+- Current phase: Trustworthy Test Verdicts, Action Validation, Ground-Truth Verification, and Execution Details (Parts 1-8 Complete)
+- Status: Single-role test cases with 1-4 checks, action validation with single re-prompt, strict per-check evidence verification, deterministic expected/observed failure construction, 5 seeded SupportDesk tickets, live LLM calls tracking, and full browser ground-truth verification on real SupportDesk passing.
 - Date of last update: 2026-10-12
 
 ## 4. Environment Facts (verified)
@@ -27,18 +27,12 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations applied to `testpilot`.
 - Redis installed in WSL2 Ubuntu, reachable at `redis://localhost:6379/0` (app) and `redis://localhost:6379/1` (tests).
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv`, Node v24.19.0, npm 11.17.0, Git 2.55.0.
-- Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 18 passed (7 auth & project tests + 9 run and report tests + 2 error boundary & not-found tests).
-- SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded demo credentials, toggleable planted defects via `SUPPORTDESK_DEFECTS`. All 3 tests pass cleanly.
+- Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 23 passed (7 auth & project tests + 14 run and report tests + 2 error boundary & not-found tests).
+- SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded with 5 tickets (IDs 1-5), toggleable planted defects via `SUPPORTDESK_DEFECTS`. All 3 tests pass cleanly.
+- SupportDesk ground-truth browser verification (`test_ground_truth_browser.py`): all 7 scenarios verified against real SupportDesk with real Playwright MCP server with defects ON (correctly catching 3 planted defects) and defects OFF (all 7 passing).
+- Measured Executor LLM calls: 25 calls / 8 tests = 3.125 calls/test (<= 6 threshold), allowing MAX_TESTS_PER_RUN default set to 12.
 - MCP Server Package: `@executeautomation/playwright-mcp-server` pinned to `1.0.12` in `mcp/package.json`. Launched directly with `node` and entrypoint `mcp/node_modules/@executeautomation/playwright-mcp-server/dist/index.js` with explicit `cwd=mcp`. No npx, no cmd shell, no runtime downloads.
-- Preflight Startup Timings Measured (via `backend/scripts/preflight_only.py`):
-  - Embedding model preload: ~18.7s-20.6s (online HuggingFace check) -> reduced to ~0.44s-0.59s with `local_files_only=True`. Peak RSS: ~500-522 MB.
-  - Credential decryption: 0.17s - 0.28s (budget 2.0s)
-  - Target reachability: 0.39s - 0.47s (budget 5.0s)
-  - MCP process start: ~0.015s
-  - MCP initialize handshake: ~1.15s - 1.55s (warm) / 15-28s (cold under memory pressure).
-  - Preflight budget: `MCP_STARTUP_TIMEOUT_SECONDS=45.0` (configurable), auto-retries once on first attempt timeout.
-  - Single browser start: Preflight hands started MCP client to `execute_node` via `_active_mcp_clients[run_id]`, eliminating redundant second browser launch.
-- Test counts: 129 backend unit/integration tests passing (+ 3 deselected live eval) + 18 frontend tests = 147 tests passing cleanly.
+- Test counts: 153 backend unit/integration tests passing (+ 1 browser test suite + 3 deselected live eval) + 23 frontend tests = 176+ tests passing cleanly.
 - Ruff clean on backend and supportdesk; lint clean on frontend.
 
 ## 5. Conventions in Use
@@ -51,7 +45,13 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - ORM model for user sessions is named `UserSession` (mapped to `sessions` table) to avoid colliding with SQLAlchemy's `Session`.
 - JWT decoding requires explicit `algorithms=["HS256"]` and verifies `exp`, `sub`, and `jti`.
 - Email handling: stripped and lowercased on registration and login.
-- Redis health check uses scoped connection per check to prevent closed event loop errors across test runs.
+- Health check route: `GET /health` on port 8000 (verifies API, DB with pgvector, and Redis).
+- Single-role test cases: each test case targets exactly ONE role and 1 to 4 checks (`TestCase.checks` JSONB column).
+- Action validation: navigate requires url, click requires selector, fill/select require selector + value, press_key requires key. Missing required fields trigger a single re-prompt and do not count toward step limit.
+- Per-check evidence verification: finish action returns `check_results` mapping each planned check to PASSED/FAILED/INCONCLUSIVE, evidence quote, and >= 20-char observation. PASSED checks must have evidence verified against DOM text or URL. Negative checks must attempt the forbidden action and extract evidence from the after-state.
+- Verdict rule: PASSED only if every check is PASSED with verified evidence. Any FAILED check makes test FAILED. Any INCONCLUSIVE check makes test BLOCKED.
+- Deterministic Expected & Observed failure details: expected from `expected_result`, observed from final observation, quote, and last page state.
+- Live LLM calls tracking: live calls tracked via `get_live_call_count()`, persisted in run report JSON and displayed in UI.
 - Redis Key Patterns & Cleanup (DB 0 runtime, DB 1 tests):
   - Duplicate-run lock: `project_run_lock:{project_id}` (TTL max(RUN_TIMEOUT_SECONDS + 300, 2100), default 2100s per D-025). Cleanup: `redis-cli del "project_run_lock:<project_id>"`
   - Worker heartbeat: `worker_heartbeat:{run_id}` (TTL 60s, refreshed every 15s). Cleanup: `redis-cli del "worker_heartbeat:<run_id>"`

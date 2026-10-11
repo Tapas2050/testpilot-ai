@@ -1,13 +1,12 @@
-"""Report Generator: Computes math-sound metrics and assembles final test run report."""
-
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 
 def generate_run_report(
     test_cases: list[dict[str, Any]],
     results: list[dict[str, Any]],
     failures: list[dict[str, Any]],
+    live_llm_calls: Optional[int] = None,
 ) -> dict[str, Any]:
     """Generate final JSON report with totals, pass percentage, and failure breakdowns."""
     total = len(test_cases)
@@ -54,6 +53,9 @@ def generate_run_report(
             f"PRODUCT_BUGs requiring engineering attention."
         )
 
+    if live_llm_calls is not None:
+        summary_text += f" Total live LLM calls: {live_llm_calls}."
+
     return {
         "total_tests": total,
         "passed_tests": passed,
@@ -66,5 +68,7 @@ def generate_run_report(
         "failures": failures,
         "test_cases": test_cases,
         "results": results,
+        "live_llm_calls": live_llm_calls if live_llm_calls is not None else 0,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
