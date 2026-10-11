@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select
 
 from app.agent.analyst import FailureAnalysisOutput, analyze_test_failure
 from app.agent.llm import set_mock_llm
@@ -42,6 +43,205 @@ def test_t11_1_failure_schema_allowed_categories():
     valid_data["classification"] = "USER_ERROR"
     with pytest.raises(ValidationError):
         FailureAnalysisOutput.model_validate(valid_data)
+
+
+def test_failure_schema_rejects_empty_strings():
+    """Part 3(b): FailureAnalysisOutput must reject empty strings for all fields."""
+    for field in ["expected", "observed", "explanation", "suggested_action"]:
+        invalid_data = {
+            "classification": "PRODUCT_BUG",
+            "severity": "HIGH",
+            "confidence": 0.95,
+            "expected": "Expected behavior per requirement",
+            "observed": "Observed behavior during run",
+            "explanation": "Valid root cause explanation",
+            "suggested_action": "Valid suggested engineering action",
+        }
+        invalid_data[field] = ""
+        with pytest.raises(ValidationError):
+            FailureAnalysisOutput.model_validate(invalid_data)
+
+
+@pytest.mark.asyncio
+async def test_analyst_bypass_llm_for_loop_and_env_failures():
+    """Part 3(b): Loop detection, env failures, and auth failures bypass LLM with filled fields."""
+    res_loop = await analyze_test_failure(
+        title="Loop test",
+        description="Verify loop handling",
+        source_requirement="REQ-LOOP-01",
+        target_role="agent",
+        steps=[],
+        error_message="Execution loop detected: 6 consecutive steps made no progress",
+    )
+    assert res_loop.classification == "TEST_FAILURE"
+    assert res_loop.expected
+    assert res_loop.observed
+    assert "loop" in res_loop.explanation.lower()
+
+    res_env = await analyze_test_failure(
+        title="Env test",
+        description="Verify env timeout",
+        source_requirement="REQ-ENV-01",
+        target_role="agent",
+        steps=[],
+        error_message="Environment failure: tool call timeout in browser",
+    )
+    assert res_env.classification == "ENVIRONMENT_FAILURE"
+    assert res_env.expected
+    assert res_env.observed
+    assert "environment" in res_env.explanation.lower()
+
+    res_auth = await analyze_test_failure(
+        title="Auth test",
+        description="Verify auth failure",
+        source_requirement="REQ-AUTH-01",
+        target_role="agent",
+        steps=[],
+        error_message="Authentication failed: credentials rejected",
+    )
+    assert res_auth.classification == "AUTHENTICATION_FAILURE"
+    assert res_auth.expected
+    assert res_auth.observed
+    assert "authentication" in res_auth.explanation.lower()
+
+
+@pytest.mark.asyncio
+async def test_analyst_suggested_action_never_mentions_test_script():
+    """Part 3(c): Failure analyst never tells user to update or fix a test script."""
+    mock_llm = MagicMock()
+    mock_diag = FailureAnalysisOutput(
+        classification="PRODUCT_BUG",
+        severity="HIGH",
+        confidence=0.9,
+        expected="Valid expected",
+        observed="Valid observed",
+        explanation="Product flaw",
+        suggested_action="Please update the test script to pass.",
+    )
+    mock_llm.ainvoke = AsyncMock(return_value=mock_diag)
+    set_mock_llm(mock_llm)
+    try:
+        diag = await analyze_test_failure(
+            title="Ticket create",
+            description="Create ticket",
+            source_requirement="REQ-TC-01",
+            target_role="admin",
+            steps=[],
+            error_message="Creation failed",
+        )
+        assert "script" not in diag.suggested_action.lower()
+    finally:
+        set_mock_llm(None)
+
+
+@pytest.mark.asyncio
+async def test_regression_expected_or_observed_never_blank_in_failure_or_report():
+    """Part 3(d): Regression test verifying expected and observed are never blank."""
+    from app.agent.graph import analyze_node
+    from app.core.config import get_settings
+    from app.core.database import get_async_session_factory
+    from app.models.project import Project
+    from app.models.test_run import Failure, TestCase, TestResult, TestRun
+    from app.models.user import User
+
+    settings = get_settings()
+    session_factory = get_async_session_factory(settings.TEST_DATABASE_URL)
+    run_id = uuid.uuid4()
+    proj_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    async with session_factory() as session:
+        user = User(
+            id=user_id,
+            email=f"reg_analyst_{uuid.uuid4().hex[:6]}@example.com",
+            password_hash="dummy",
+        )
+        proj = Project(
+            id=proj_id,
+            user_id=user_id,
+            name="Regression Proj",
+            target_url="http://localhost:8001",
+        )
+        run = TestRun(id=run_id, project_id=proj_id, status="EXECUTING")
+        session.add_all([user, proj, run])
+        await session.flush()
+
+        tc_id = uuid.uuid4()
+        tc = TestCase(
+            id=tc_id,
+            run_id=run_id,
+            title="Search by ID",
+            description="",  # Empty description to test fallback
+            source_requirement="REQ-SRCH-01",
+            status="FAILED",
+            order_index=1,
+        )
+        res = TestResult(
+            test_case_id=tc_id,
+            status="FAILED",
+            error_message="No ticket returned for ID 10",
+            steps=[
+                {
+                    "step": 1,
+                    "action": "navigate",
+                    "url": "http://localhost:8001/tickets?search=10",
+                    "observation": "Table is empty",
+                    "evidence": "No tickets found",
+                }
+            ],
+        )
+        session.add_all([tc, res])
+        await session.commit()
+
+    # Mock analyst returning valid diagnosis
+    mock_llm = MagicMock()
+    mock_diag = FailureAnalysisOutput(
+        classification="PRODUCT_BUG",
+        severity="HIGH",
+        confidence=0.9,
+        expected="Search returns matching ticket",
+        observed="Search returned zero results",
+        explanation="Search query logic failed to match by ID",
+        suggested_action="Fix ticket query filter in search endpoint",
+    )
+    mock_llm.ainvoke = AsyncMock(return_value=mock_diag)
+    set_mock_llm(mock_llm)
+
+    try:
+        state = {
+            "run_id": str(run_id),
+            "project_id": str(proj_id),
+            "db_url": settings.TEST_DATABASE_URL,
+            "test_cases": [],
+            "results": [],
+            "failures": [],
+        }
+        res_state = await analyze_node(state)
+        failures = res_state["failures"]
+        assert len(failures) == 1
+        for f in failures:
+            assert f["expected"] and len(f["expected"].strip()) > 0
+            assert f["observed"] and len(f["observed"].strip()) > 0
+
+        # Check DB failure record directly
+        async with session_factory() as session:
+            stmt = select(Failure).where(Failure.test_case_id == tc_id)
+            db_fail = (await session.execute(stmt)).scalar_one()
+            assert db_fail.expected and len(db_fail.expected.strip()) > 0
+            assert db_fail.observed and len(db_fail.observed.strip()) > 0
+
+        # Check generated report JSON
+        rep = generate_run_report(
+            test_cases=[{"id": str(tc_id), "status": "FAILED"}],
+            results=[{"test_case_id": str(tc_id), "status": "FAILED"}],
+            failures=failures,
+        )
+        assert len(rep["failures"]) == 1
+        rep_fail = rep["failures"][0]
+        assert rep_fail["expected"] and len(rep_fail["expected"].strip()) > 0
+        assert rep_fail["observed"] and len(rep_fail["observed"].strip()) > 0
+    finally:
+        set_mock_llm(None)
 
 
 @pytest.mark.asyncio

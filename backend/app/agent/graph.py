@@ -613,6 +613,8 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
                 target_role=tc.target_role,
                 steps=steps,
                 error_message=err_msg,
+                expected_result=getattr(tc, "expected_result", None),
+                checks=getattr(tc, "checks", None),
             )
 
             db_failure = Failure(
