@@ -204,3 +204,69 @@ async def test_t9_7_eval_supportdesk_requirements_plan():
     assert any("delete" in all_text for _ in [1])
     assert any("admin" in all_text for _ in [1])
     assert len(requirements_cited) == len(plan.test_cases)
+
+
+@pytest.mark.asyncio
+async def test_part7_requirement_coverage_accounting_with_11_ids_and_cap_of_8():
+    """Part 7(c): A requirement list with 11 IDs and a cap of 8 produces a plan
+    whose cited IDs plus declared uncovered list account for all 11, and REQ-TKT-02 is covered.
+    """
+    req_ids = [
+        "REQ-AUTH-01",
+        "REQ-AUTH-02",
+        "REQ-TKT-01",
+        "REQ-TKT-02",
+        "REQ-TKT-03",
+        "REQ-TKT-04",
+        "REQ-SEARCH-01",
+        "REQ-SEARCH-02",
+        "REQ-SEC-01",
+        "REQ-SEC-02",
+        "REQ-NOTIF-01",
+    ]
+    requirements_text = "\n".join(
+        f"### {rid}\nDescription for {rid} requires observable web interface workflow."
+        for rid in req_ids
+    )
+
+    # Mock planner generating 8 test cases covering 8 of the IDs, including REQ-TKT-02
+    mock_test_cases = [
+        PlannedTestCase(
+            title=f"Test for {rid}",
+            description=f"Verify {rid} in web UI",
+            source_requirement=rid,
+            target_role="admin",
+            steps=["Navigate to target", f"Verify {rid} visible outcome"],
+        )
+        for rid in req_ids[:8]  # First 8 IDs include REQ-TKT-02
+    ]
+
+    mock_llm = MagicMock()
+    mock_plan = PlanOutput(
+        test_cases=mock_test_cases,
+        uncovered_requirements=req_ids[8:],  # Remaining 3 IDs
+    )
+    mock_llm.ainvoke = AsyncMock(return_value=mock_plan)
+    set_mock_llm(mock_llm)
+
+    plan = await generate_test_plan(
+        requirements_text=requirements_text,
+        project_url="http://localhost:8001",
+    )
+
+    # 1. Total tests capped at 8
+    assert len(plan.test_cases) == 8
+
+    # 2. REQ-TKT-02 is covered in cited test cases
+    cited_ids = set()
+    for tc in plan.test_cases:
+        from app.agent.planner import parse_requirement_ids
+
+        cited_ids.update(parse_requirement_ids(tc.source_requirement))
+    assert "REQ-TKT-02" in cited_ids
+
+    # 3. Cited IDs plus declared uncovered list account for all 11 requirement IDs
+    all_accounted = cited_ids.union(set(plan.uncovered_requirements))
+    assert all_accounted == set(req_ids)
+    assert len(all_accounted) == 11
+

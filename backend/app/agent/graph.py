@@ -63,9 +63,12 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
     # Retrieve project documents and generate test plan via Planner Agent
     session_factory = get_async_session_factory(db_url)
     async with session_factory() as session:
+        import re
+
         from sqlalchemy import select
 
         from app.agent.planner import generate_test_plan
+        from app.models.chunk import DocumentChunk
         from app.models.document import Document
         from app.models.project import Project
         from app.services.rag_service import RAGService
@@ -75,19 +78,39 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
         project = (await session.execute(proj_stmt)).scalar_one_or_none()
         target_url = project.target_url if project else "http://localhost:8001"
 
-        rag = RAGService()
-        rag_query = (
-            "user roles authentication login ticket creation "
-            "status search filter delete permissions"
+        # Part 7a: If project documents have <= 30 chunks, pass all of them to the planner.
+        # For larger documents, retrieve using requirement IDs and headings.
+        chunk_stmt = (
+            select(DocumentChunk)
+            .where(DocumentChunk.project_id == project_id)
+            .order_by(DocumentChunk.chunk_index)
         )
-        chunks = await rag.retrieve(
-            session,
-            project_id,
-            query=rag_query,
-            top_k=8,
-        )
+        all_chunks = (await session.execute(chunk_stmt)).scalars().all()
 
-        requirements_parts = [c["content"] for c in chunks] if chunks else []
+        if all_chunks and len(all_chunks) <= 30:
+            requirements_parts = [c.content for c in all_chunks if c.content and c.content.strip()]
+        elif all_chunks and len(all_chunks) > 30:
+            doc_stmt = select(Document.extracted_text).where(
+                Document.project_id == project_id,
+                Document.extracted_text.isnot(None),
+            )
+            docs = (await session.execute(doc_stmt)).scalars().all()
+            combined_docs = "\n".join(d for d in docs if d)
+            req_ids = re.findall(r"\bREQ-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\b", combined_docs)
+            headings = re.findall(r"^#{1,3}\s+(.+)$", combined_docs, flags=re.MULTILINE)
+            query_terms = list(dict.fromkeys(req_ids + headings[:15]))
+            dynamic_query = " ".join(query_terms) if query_terms else "specifications requirements"
+
+            rag = RAGService()
+            chunks = await rag.retrieve(
+                session,
+                project_id,
+                query=dynamic_query,
+                top_k=20,
+            )
+            requirements_parts = [c["content"] for c in chunks] if chunks else []
+        else:
+            requirements_parts = []
 
         if not requirements_parts:
             doc_stmt = select(Document.extracted_text).where(
