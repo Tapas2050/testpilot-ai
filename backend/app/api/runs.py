@@ -80,6 +80,8 @@ def extract_execution_details(res: Any) -> dict[str, Any]:
             "steps": [],
             "duration_seconds": None,
             "screenshot_path": None,
+            "failure_screenshot_path": None,
+            "screenshot_error": None,
             "evidence": None,
             "final_observation": None,
             "check_results": [],
@@ -360,6 +362,8 @@ async def get_test_run(
         test_key = getattr(tc, "test_key", None)
         if not test_key:
             test_key = f"TC-{tc.order_index}" if min_order == 1 else f"TC-{tc.order_index + 1}"
+        elif min_order == 1 and test_key == f"TC-{tc.order_index + 1}":
+            test_key = f"TC-{tc.order_index}"
 
         tc_responses.append(
             TestCaseResponse(
@@ -574,10 +578,13 @@ async def get_test_run_report(
     if missing_tcs or missing_res:
         tc_list = []
         res_list = []
+        min_order = min((t.order_index for t in run.test_cases), default=0)
         for tc in run.test_cases:
             res = tc.results[0] if tc.results else None
             details = extract_execution_details(res)
-            test_key = getattr(tc, "test_key", None) or f"TC-{tc.order_index + 1}"
+            test_key = getattr(tc, "test_key", None) or (
+                f"TC-{tc.order_index}" if min_order == 1 else f"TC-{tc.order_index + 1}"
+            )
             tc_list.append({
                 "id": str(tc.id),
                 "title": tc.title,
@@ -614,6 +621,22 @@ async def get_test_run_report(
                 })
         rep["test_cases"] = tc_list
         rep["results"] = res_list
+    elif "test_cases" in rep and isinstance(rep["test_cases"], list):
+        min_rep_order = min(
+            (
+                tc_item.get("order_index", 0)
+                for tc_item in rep["test_cases"]
+                if isinstance(tc_item, dict) and "order_index" in tc_item
+            ),
+            default=0,
+        )
+        for idx, tc_item in enumerate(rep["test_cases"]):
+            if isinstance(tc_item, dict):
+                tc_ord = tc_item.get("order_index", idx)
+                expected_k = f"TC-{tc_ord}" if min_rep_order == 1 else f"TC-{tc_ord + 1}"
+                curr_k = tc_item.get("test_key")
+                if not curr_k or (min_rep_order == 1 and curr_k == f"TC-{tc_ord + 1}"):
+                    tc_item["test_key"] = expected_k
 
     return rep
 

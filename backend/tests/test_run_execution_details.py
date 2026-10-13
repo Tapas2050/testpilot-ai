@@ -174,3 +174,85 @@ async def test_get_run_report_response_shape(
     assert failure["observed"] == "Ticket was deleted"
     assert failure["expected_behavior"] == "403 Forbidden received"
     assert failure["observed_behavior"] == "Ticket was deleted"
+
+
+@pytest.mark.asyncio
+async def test_test_key_numbering_starts_at_tc_1_consistently(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: tuple[dict[str, str], any, any],
+):
+    """Part 5: Verify test_key starts at TC-1 across API and reports for 0-based and legacy runs."""
+    headers, user_id, project_id = auth_headers
+
+    # 1. Zero-based run (order_index 0, 1, 2)
+    run_zero = TestRun(
+        project_id=project_id,
+        status="COMPLETED",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(run_zero)
+    await db_session.flush()
+
+    for idx in range(3):
+        tc = TestCase(
+            run_id=run_zero.id,
+            title=f"Test Case {idx}",
+            source_requirement=f"REQ-{idx}",
+            target_role="agent",
+            status="PASSED",
+            order_index=idx,
+        )
+        db_session.add(tc)
+    await db_session.commit()
+
+    resp = await client.get(f"/runs/{run_zero.id}", headers=headers)
+    assert resp.status_code == 200
+    zero_keys = [tc["test_key"] for tc in resp.json()["test_cases"]]
+    assert zero_keys == ["TC-1", "TC-2", "TC-3"]
+
+    # 2. Legacy one-based run (order_index 1, 2, 3 as stored by older planner versions)
+    run_one = TestRun(
+        project_id=project_id,
+        status="COMPLETED",
+        created_at=datetime.now(timezone.utc),
+        report={
+            "total_tests": 3,
+            "passed_tests": 3,
+            "failed_tests": 0,
+            "pass_percentage": 100.0,
+            "test_cases": [
+                {"id": "tc1", "title": "Test 1", "order_index": 1, "test_key": "TC-2"},
+                {"id": "tc2", "title": "Test 2", "order_index": 2, "test_key": "TC-3"},
+                {"id": "tc3", "title": "Test 3", "order_index": 3, "test_key": "TC-4"},
+            ],
+            "failures": [],
+        },
+    )
+    db_session.add(run_one)
+    await db_session.flush()
+
+    for idx in range(1, 4):
+        tc = TestCase(
+            run_id=run_one.id,
+            title=f"Legacy Test {idx}",
+            source_requirement=f"REQ-LEGACY-{idx}",
+            target_role="agent",
+            status="PASSED",
+            order_index=idx,
+        )
+        db_session.add(tc)
+    await db_session.commit()
+
+    # GET /runs/{id} must start at TC-1, not TC-2
+    resp_one = await client.get(f"/runs/{run_one.id}", headers=headers)
+    assert resp_one.status_code == 200
+    legacy_keys = [tc["test_key"] for tc in resp_one.json()["test_cases"]]
+    assert legacy_keys == ["TC-1", "TC-2", "TC-3"]
+
+    # GET /runs/{id}/report must also normalize to start at TC-1
+    resp_rep = await client.get(f"/runs/{run_one.id}/report", headers=headers)
+    assert resp_rep.status_code == 200
+    rep_keys = [tc["test_key"] for tc in resp_rep.json()["test_cases"]]
+    assert rep_keys == ["TC-1", "TC-2", "TC-3"]
+
