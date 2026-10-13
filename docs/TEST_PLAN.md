@@ -146,6 +146,14 @@ Phase 18 (Trustworthy Verdicts, Execution Details, Action Validation, and Ground
 - T18.7 Scripted Ground-Truth Browser Verification: test_ground_truth_browser.py runs scripted worker pipeline against real Playwright MCP server and real SupportDesk. Defects ON verifies 3 failures (agent cannot delete, high priority stored as Low, ID search returns nothing) and 4 passes. Defects OFF verifies all 7 pass. Clean process teardown verified.
 - T18.8 Metrics & Health Check: Live LLM calls counted and reported in summary and live_llm_calls field. Backend health route GET /health documented.
 
+Phase 19 (Reliable Screenshot Evidence Pipeline & SupportDesk Status Fix)
+- T19.1 Centralized Absolute Screenshot Storage: screenshot_storage.py resolves storage root absolutely against repository root, independent of worker or API server CWD. Validates PNG 8-byte magic header (\x89PNG\r\n\x1a\n), enforces min 64B and max 5MB, handles both base64 payloads and filesystem paths, strips server-appended timestamp suffixes, caps at 30 screenshots per run, and logs non-fatal screenshot errors without failing test runs.
+- T19.2 Secure Screenshot Serving: GET /runs/{run_id}/screenshots/{filename} enforces project/run ownership (cross-user access returns 404), validates filename regex (^[a-zA-Z0-9_\-\.]+\.png$), rejects path traversal (400), and sets Cache-Control: private, max-age=300.
+- T19.3 Automated Screenshot Tests: test_screenshot_storage.py verifies CWD independence, magic header validation, base64 decoding, timestamp canonicalization, non-fatal handling, and retention cleanup. test_screenshot_api.py verifies authorized serving with cache headers, cross-user isolation 404, path traversal rejection, and missing file 404.
+- T19.4 Frontend Authenticated Screenshot Viewer: ScreenshotViewer fetches image blobs with Authorization bearer token, converts to object URLs with cleanup on unmount, provides zoom modal, and renders informative fallback for missing/error states.
+- T19.5 SupportDesk Status & Assignee Form Fix: Fixed unplanted 500 error in supportdesk/app/main.py:478 caused by Form parameter name 'status' shadowing FastAPI's status module. Preserves 3 planted defects intact and verified with automated test test_status_and_assignee_update_web_form (defects ON and OFF).
+- T19.6 Ground-Truth Browser Screenshot Evidence: test_ground_truth_browser.py asserts physical screenshot files on disk >= 1000 bytes and valid HTTP 200 image/png responses for all 7 scenarios under both defects ON (10 PNGs including failure moments) and defects OFF (7 PNGs).
+
 ## 4. Agent Quality Metrics (record in MEMORY.md after each eval run)
 - Planned tests traceable to a requirement: target 100 percent
 - Planted defects found on the defective build: target 3 of 3

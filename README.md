@@ -226,3 +226,19 @@ npm.cmd test
 cd backend; uv run ruff check .
 cd frontend; npm.cmd run lint
 ```
+
+---
+
+## Screenshot Evidence Storage & Retention
+
+- **Storage Location**: Screenshots are stored on disk under `storage/screenshots/{run_id}/` (resolved absolutely against the repository root, ensuring consistent paths across the FastAPI API, Celery/worker process, and MCP server).
+- **Naming Convention**:
+  - `{test_case_id}.png`: Final viewport screenshot captured at the end of each test case.
+  - `{test_case_id}-failure.png`: Moment-of-failure screenshot captured immediately when a check fails.
+- **Git Ignore**: The `storage/` directory is strictly git-ignored and never committed.
+- **Retention & Automatic Cleanup**:
+  - Controlled by the `SCREENSHOT_RETENTION_DAYS` setting in `.env` (defaults to `14` days).
+  - On worker startup, any screenshot directories older than the retention threshold are automatically deleted.
+- **Manual Inspection & Cleanup**:
+  - Inspect files locally on disk: `Get-ChildItem -Path storage/screenshots`
+  - Manually remove all historical screenshots: `Remove-Item -Recurse -Force storage/screenshots/*`

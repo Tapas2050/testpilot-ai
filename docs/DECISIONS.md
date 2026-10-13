@@ -316,3 +316,19 @@ Decision:
     - Daily quota: With a budget of 500 requests/day per model, a 12-test run uses ~50 calls, allowing up to 10 full runs per day per model before reaching daily limits.
 - When requirement count exceeds the cap, overflow cases are truncated and their requirement IDs are preserved in `uncovered_requirements` in the plan and test report.
 Consequences: Full, trustworthy test coverage for all requirement IDs with single-role isolation and observable checks without exceeding RPM or daily LLM quotas.
+
+## D-040 Reliable Screenshot Storage, Serving, and Cleanup
+Status: Accepted
+Context: In real run 5b6c8f3b-9d37-43ef-9e23-5ead94efe085, screenshot evidence displayed "Screenshot failed" across all test cases with repeated 404s. Root cause analysis revealed five failure modes: (1) relative `STORAGE_DIR` resolved to different locations depending on process working directories (worker in `backend/` vs API in repo root); (2) MCP client ran with CWD `mcp/node_modules/`, scattering files under `mcp/node_modules/storage/...`; (3) `@executeautomation/playwright-mcp-server` appends timestamps to screenshot filenames (`name-${timestamp}.png`), causing name mismatches with the database; (4) paths were recorded without checking physical existence or PNG magic signature on disk; (5) frontend `img` tag could not pass JWT authentication headers.
+Decision:
+- Centralized storage module `app.services.screenshot_storage`:
+  * Resolves `STORAGE_DIR` strictly against repository root `ROOT_DIR`, guaranteeing path consistency across API, worker, and MCP child processes.
+  * Captures viewport-sized screenshots (`fullPage: False`) at the end of every test case and immediately upon check failure (`{test_case_id}.png` and `{test_case_id}-failure.png`), capped at 30 screenshots per run.
+  * Decodes base64 data and renames timestamped files to canonical target names.
+  * Validates 8-byte PNG magic signature (`\x89PNG\r\n\x1a\n`), min size (64 bytes), and max size (5 MB) on disk before recording path in database.
+  * Non-fatal error handling: failure to capture a screenshot records a short reason (`screenshot_error`), logs a warning with run ID, and leaves test verdict intact.
+  * Credential scrubbing: password fields are cleared/masked before capturing screenshots.
+  * Evidence endpoint `GET /runs/{run_id}/screenshots/{filename}` enforces project ownership (cross-user returns 404), regex validation (`^[a-zA-Z0-9_\-\.]+\.png$`), rejects directory traversal, and returns `image/png` with `Cache-Control: private, max-age=300`.
+  * Frontend fetches authenticated blob with authorization headers, converts to object URL (revoked on unmount), displays thumbnail and modal view, and renders clear fallback with reason instead of generic errors.
+  * Retention management: `SCREENSHOT_RETENTION_DAYS` (default 14 days), automatically pruned on worker startup.
+Consequences: Screenshot evidence is deterministic, validated on disk, securely served, authenticated in UI, and automatically lifecycle-managed.

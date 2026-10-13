@@ -155,3 +155,11 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] Part 7: Scripted real-browser ground-truth check against SupportDesk on port 8001 (defects on and off), verified all 7 scenarios match ground-truth
 - [x] Part 8: Housekeeping (health check URL doc fix, Docker-free instructions, MEMORY/DECISIONS/TASKS/TEST_PLAN updates, total live LLM calls tracking in summary and UI)
 
+## Screenshot Evidence Reliability & SupportDesk Unplanted Bug Investigation
+- [x] Part 1: Diagnose run 5b6c8f3b-9d37-43ef-9e23-5ead94efe085 end-to-end (cwd-dependent STORAGE_DIR, MCP cwd mcp/node_modules, playwright-mcp-server timestamp appending, unverified DB paths, unauthenticated img tag, SupportDesk status parameter shadowing FastAPI status module causing 500)
+- [x] Part 2: Make screenshot capture reliable (centralized screenshot_storage.py, absolute path from ROOT_DIR, viewport-sized captures, test-end and failure-moment captures, base64 and timestamp normalization, 8-byte PNG magic + size validation on disk, non-fatal screenshot errors, password field masking, D-040)
+- [x] Part 3: Serve and show screenshots securely (GET /runs/{run_id}/screenshots/{filename} with ownership check returning 404, regex validation, directory traversal prevention, Cache-Control header, frontend authenticated blob fetch with object URL and unmount revoke, enlarged modal view, fallback message with reason, side-by-side failure and final screenshots)
+- [x] Part 4: Automated tests (unit tests for CWD independence, base64 decoding, disk validation, non-fatal errors; API tests for owner 200, cross-user 404, traversal rejection; real Playwright MCP ground-truth browser test asserting all PNGs on disk >= 1000 bytes served with HTTP 200 with defects ON and OFF; frontend vitest suite for loading, success, 404, and no-path states)
+- [x] Part 5: SupportDesk 500 investigation and fix (fixed status parameter shadowing in supportdesk/app/main.py with status_code=303, preserved 3 planted defects, added correct/defective build tests, reseeded supportdesk.db)
+- [x] Part 6: Housekeeping (verified storage/ in .gitignore, README.md screenshot section, SCREENSHOT_RETENTION_DAYS=14 with startup cleanup, updated MEMORY.md, DECISIONS.md, TASKS.md, TEST_PLAN.md)
+
