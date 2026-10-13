@@ -247,3 +247,28 @@ def test_seeded_tickets_data(monkeypatch):
     assert search_pwd.status_code == 200
     assert any(t["id"] == 1 for t in search_pwd.json())
 
+
+def test_reproduce_status_and_assignee_update_web_form():
+    """Verify web form POST /tickets/{id}/update for status and assignee."""
+    from app.config import get_settings
+    settings = get_settings()
+    from app.main import app
+
+    client = TestClient(app, follow_redirects=False)
+
+    # Login via web form
+    login_resp = client.post(
+        "/login",
+        data={"email": settings.SUPPORTDESK_AGENT_EMAIL, "password": settings.SUPPORTDESK_AGENT_PASSWORD},
+    )
+    assert login_resp.status_code == 303
+
+    # Reproduce: Update ticket #1 status currently raises AttributeError due to status shadowing
+    with pytest.raises(AttributeError, match="'str' object has no attribute 'HTTP_303_SEE_OTHER'"):
+        client.post(
+            "/tickets/1/update",
+            data={"status": "IN_PROGRESS", "assignee": settings.SUPPORTDESK_AGENT_EMAIL},
+        )
+
+
+
