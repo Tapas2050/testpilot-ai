@@ -15,6 +15,7 @@ from app.agent.page_observer import get_page_observation
 from app.core.config import get_settings
 from app.models.test_run import TestCase, TestResult
 from app.services.run_service import append_live_step_event, update_live_progress
+from app.services.screenshot_storage import capture_screenshot
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,17 @@ async def perform_role_login(
         or "login failed" in lower_text
         or "authentication failed" in lower_text
     ):
+        try:
+            await mcp_client.call_tool(
+                "playwright_fill",
+                {
+                    "selector": "input[type='password'], input[name='password'], #password",
+                    "value": "",
+                },
+            )
+        except Exception:
+            pass
+
         return {
             "step": 1,
             "action": "login",
@@ -246,6 +258,8 @@ async def execute_single_test_case(
 
     status: str = "FAILED"
     error_message: Optional[str] = None
+    failure_screenshot_path: Optional[str] = None
+    screenshot_error: Optional[str] = None
     step_num = 1
 
     await update_live_progress(run_id, current_test=test_case.title, current_step=0)
@@ -760,6 +774,15 @@ Decide the next browser action, or finish if all checks are evaluated."""
                                 f"Check {failed_check['check_id']} failed: {obs_text}"
                             )
                         error_message = obs_text
+                        fail_path, fail_err = await capture_screenshot(
+                            mcp_client=mcp_client,
+                            run_id=run_id,
+                            filename=f"{test_case.id}-failure.png",
+                        )
+                        if fail_path:
+                            failure_screenshot_path = fail_path
+                        if fail_err and not screenshot_error:
+                            screenshot_error = fail_err
                     elif has_inconclusive:
                         status = "BLOCKED"
                         inc_check = next(
@@ -964,24 +987,26 @@ Decide the next browser action, or finish if all checks are evaluated."""
         error_message = str(exc)
         status = "FAILED"
 
-    # Capture final screenshot (T10.3)
-    screenshot_rel_path: Optional[str] = None
-    try:
-        ss_dir = storage_dir / "screenshots" / str(run_id)
-        ss_dir.mkdir(parents=True, exist_ok=True)
-        ss_filename = f"{test_case.id}.png"
-        await mcp_client.call_tool(
-            "playwright_screenshot",
-            {
-                "name": ss_filename,
-                "downloadsDir": str(ss_dir),
-                "fullPage": True,
-                "savePng": True,
-            },
+    # Capture failure screenshot if status is FAILED and not yet captured
+    if status == "FAILED" and not failure_screenshot_path:
+        fail_path, fail_err = await capture_screenshot(
+            mcp_client=mcp_client,
+            run_id=run_id,
+            filename=f"{test_case.id}-failure.png",
         )
-        screenshot_rel_path = f"screenshots/{run_id}/{ss_filename}"
-    except Exception as ss_exc:
-        logger.warning(f"Failed to capture screenshot: {ss_exc}")
+        if fail_path:
+            failure_screenshot_path = fail_path
+        if fail_err and not screenshot_error:
+            screenshot_error = fail_err
+
+    # Capture final screenshot at end of test (pass or fail)
+    final_ss_path, final_ss_err = await capture_screenshot(
+        mcp_client=mcp_client,
+        run_id=run_id,
+        filename=f"{test_case.id}.png",
+    )
+    if final_ss_err and not screenshot_error:
+        screenshot_error = final_ss_err
 
     duration = round(time.monotonic() - start_time, 2)
     clean_steps = sanitize_steps(steps_taken, secrets_to_redact)
@@ -991,7 +1016,9 @@ Decide the next browser action, or finish if all checks are evaluated."""
         test_case_id=test_case.id,
         status=status,
         steps=clean_steps,
-        screenshot_path=screenshot_rel_path,
+        screenshot_path=final_ss_path,
+        failure_screenshot_path=failure_screenshot_path,
+        screenshot_error=screenshot_error,
         duration_seconds=duration,
         error_message=clean_error,
     )

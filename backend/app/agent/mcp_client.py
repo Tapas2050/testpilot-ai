@@ -156,8 +156,9 @@ class PlaywrightMCPClient:
                 "Ensure 'npm install' was run in mcp/ directory."
             )
 
-        timeout = startup_timeout or 45.0
         mcp_cwd = self.server_path.parent.parent.parent.parent
+        if mcp_cwd.name == "node_modules":
+            mcp_cwd = mcp_cwd.parent
         cwd = str(mcp_cwd) if mcp_cwd.exists() else None
 
         self._process = await asyncio.create_subprocess_exec(
@@ -184,7 +185,7 @@ class PlaywrightMCPClient:
             },
         }
         await self._write_msg(init_msg)
-        await self._read_response(self._req_id, timeout=timeout)
+        await self._read_response(self._req_id, timeout=30.0)
 
         # Handshake step 2: notifications/initialized
         notify_msg = {"jsonrpc": "2.0", "method": "notifications/initialized"}

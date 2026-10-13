@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(
         "INFO", description="Log level for API and worker (DEBUG, INFO, WARNING, ERROR)"
     )
+    SCREENSHOT_RETENTION_DAYS: int = Field(
+        14, description="Retention period for screenshots in days"
+    )
 
     @field_validator("JWT_SECRET", mode="after")
     @classmethod

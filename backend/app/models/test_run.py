@@ -99,6 +99,8 @@ class TestResult(Base):
     steps: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     screenshot_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    failure_screenshot_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    screenshot_error: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Relationships

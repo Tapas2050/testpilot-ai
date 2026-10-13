@@ -91,5 +91,17 @@ async def ensure_db_schema(target_engine: Optional[Any] = None) -> None:
             await conn.execute(
                 text("ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS failed_stage VARCHAR(32);")
             )
+            await conn.execute(
+                text(
+                    "ALTER TABLE test_results "
+                    "ADD COLUMN IF NOT EXISTS failure_screenshot_path VARCHAR(512);"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE test_results "
+                    "ADD COLUMN IF NOT EXISTS screenshot_error VARCHAR(512);"
+                )
+            )
     except Exception as exc:
         logger.warning("ensure_db_schema warning: %s", exc)

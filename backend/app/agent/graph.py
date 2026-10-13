@@ -19,7 +19,11 @@ from app.agent.preflight import PreflightCheckError, run_preflight_checks
 from app.agent.state import AgentState
 from app.core.config import get_settings
 from app.core.database import get_async_session_factory
-from app.core.security import format_run_failure_message, sanitize_secret_values
+from app.core.security import (
+    format_run_failure_message,
+    sanitize_secret_values,
+)
+from app.models.project import Project
 from app.models.test_run import Failure, TestCase, TestResult, TestRun
 from app.services.run_service import (
     cache_run_status,
@@ -181,14 +185,12 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
     await update_run_in_db(run_id, status=stage, db_url=db_url)
     await cache_run_status(run_id, status=stage, stage=stage)
 
-    from pathlib import Path
-
     from app.core.security import decrypt_credential
     from app.models.credential import ProjectCredential
-    from app.models.project import Project
+    from app.services.screenshot_storage import get_storage_root
 
     settings = get_settings()
-    storage_dir = Path(settings.STORAGE_DIR)
+    storage_dir = get_storage_root()
 
     results = []
     auth_failures: list[dict[str, Any]] = []
@@ -608,6 +610,10 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
                         "explanation": existing_fail.explanation,
                         "suggested_action": existing_fail.suggested_action,
                         "screenshot_path": res.screenshot_path if res else None,
+                        "failure_screenshot_path": (
+                            getattr(res, "failure_screenshot_path", None) if res else None
+                        ),
+                        "screenshot_error": getattr(res, "screenshot_error", None) if res else None,
                     }
                 )
                 continue
@@ -648,6 +654,10 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
                     "explanation": analysis.explanation,
                     "suggested_action": analysis.suggested_action,
                     "screenshot_path": res.screenshot_path if res else None,
+                    "failure_screenshot_path": (
+                        getattr(res, "failure_screenshot_path", None) if res else None
+                    ),
+                    "screenshot_error": getattr(res, "screenshot_error", None) if res else None,
                 }
             )
 
@@ -710,6 +720,8 @@ async def report_node(state: AgentState) -> dict[str, Any]:
                 "test_case_id": str(r.test_case_id),
                 "duration_seconds": r.duration_seconds,
                 "screenshot_path": r.screenshot_path,
+                "failure_screenshot_path": getattr(r, "failure_screenshot_path", None),
+                "screenshot_error": getattr(r, "screenshot_error", None),
                 "error_message": r.error_message,
                 "steps": r.steps,
             }

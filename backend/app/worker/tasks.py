@@ -137,6 +137,16 @@ async def worker_startup(ctx: dict[str, Any]) -> None:
         get_process_rss_mb(),
     )
 
+    # Cleanup expired screenshots older than SCREENSHOT_RETENTION_DAYS (Requirement Part 2 & 6)
+    try:
+        from app.services.screenshot_storage import cleanup_old_screenshots
+
+        removed_dirs = cleanup_old_screenshots()
+        if removed_dirs > 0:
+            logger.info("Worker startup: Cleaned up %d expired screenshot folder(s)", removed_dirs)
+    except Exception as exc:
+        logger.warning("Worker startup: Failed cleaning up old screenshots: %s", exc)
+
     stale_jobs_count = 0
     redis = ctx.get("redis")
     if redis:
