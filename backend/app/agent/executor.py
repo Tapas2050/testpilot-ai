@@ -1,6 +1,7 @@
 """Executor Agent: Runs test cases step-by-step in Playwright with allowlist and budgets."""
 
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -18,6 +19,20 @@ from app.services.run_service import append_live_step_event, update_live_progres
 from app.services.screenshot_storage import capture_screenshot
 
 logger = logging.getLogger(__name__)
+
+FORBIDDEN_KEYWORDS = (
+    "forbidden",
+    "403",
+    "access denied",
+    "denied",
+    "not allowed",
+    "unauthorized",
+    "permission",
+    "prohibited",
+    "only administrator",
+    "cannot delete",
+    "prohibition",
+)
 
 
 def redact_credentials(text: Optional[str], secrets: list[str]) -> Optional[str]:
@@ -68,6 +83,12 @@ class CheckResult(BaseModel):
     observation: str = Field(
         description=(
             "One-sentence observation of at least 20 characters explaining the check outcome"
+        ),
+    )
+    attempted_step: Optional[int] = Field(
+        default=None,
+        description=(
+            "Step number (1-indexed) that performed the attempted action for negative checks"
         ),
     )
 
@@ -155,9 +176,16 @@ CRITICAL EXECUTION RULES:
    resulting records on the page).
 3. NEGATIVE CHECKS (Prohibitions & Permissions):
    If a check specifies that an action is forbidden (e.g. 'agent cannot delete a ticket'):
-   - You MUST attempt the forbidden action or inspect the ticket page controls as that role.
-   - Record what the page showed afterwards (an error message, redirect, or absent button).
-   - The evidence quote MUST come from that after-state.
+   - An absent button or link is NOT proof of a protected action; try the action if there is
+     any way to try it, and if the control does not exist for the role, report what was observed
+     and mark the check INCONCLUSIVE rather than PASSED.
+   - You MUST attempt the forbidden action and inspect the resulting after-state.
+   - Reference the step number that performed the attempted action in 'attempted_step'.
+   - CRITICAL VERDICT LOGIC: If the attempted action succeeded (e.g. deletion succeeded and
+     redirected to the ticket list), the check FAILED because the prohibited action was permitted!
+   - The check only PASSES if the action was explicitly rejected (e.g. HTTP 403, 'Forbidden',
+     'Access Denied', or an error message). The evidence quote MUST come from that rejection
+     in the after-state.
 4. VERIFIABLE EVIDENCE:
    Quotes in 'evidence' must be exact substring matches from the visible page text or current URL.
 5. OBSERVATIONS:
@@ -167,8 +195,8 @@ CRITICAL EXECUTION RULES:
    When you have observed enough evidence to evaluate the test objective:
    Return action="finish" with:
    - 'check_results': a list with one entry per planned check containing 'check_id', 'result'
-     ('PASSED', 'FAILED', or 'INCONCLUSIVE'), 'evidence', and a one-sentence 'observation'
-     (at least 20 characters).
+     ('PASSED', 'FAILED', or 'INCONCLUSIVE'), 'evidence', 'observation' (at least 20 chars),
+     and 'attempted_step' (for negative checks).
    - 'observation': a summary observation sentence for the entire test case (at least 20 chars)."""
 
 
@@ -237,6 +265,118 @@ async def perform_role_login(
     }
 
 
+def evaluate_check_result(
+    mr: dict[str, Any],
+    c_res: Optional[CheckResult],
+    steps_taken: list[dict[str, Any]],
+    obs: Any,
+) -> tuple[str, str]:
+    """Verify outcome of an individual check against observable evidence (no LLM calls)."""
+    desc = mr.get("description", "").lower()
+    req = (mr.get("source_requirement") or "").lower()
+    is_negative = any(
+        kw in desc or kw in req
+        for kw in [
+            "cannot",
+            "must not",
+            "prohibited",
+            "forbidden",
+            "should not",
+            "denied",
+            "prevented",
+            "not allowed",
+            "prohibition",
+        ]
+    )
+
+    ev = mr.get("evidence", "")
+    norm_ev = " ".join(ev.split()).lower() if ev else ""
+    obs_text = mr.get("observation", "")
+    current_result = mr.get("result", "PASSED")
+
+    if is_negative:
+        # Negative check: Action must be forbidden / prohibited
+        attempted_step_num = None
+        if c_res and getattr(c_res, "attempted_step", None):
+            attempted_step_num = c_res.attempted_step
+        if attempted_step_num is None:
+            matches = re.findall(r"step\s*(\d+)", obs_text, re.IGNORECASE)
+            if matches:
+                attempted_step_num = int(matches[-1])
+
+        attempt_step = None
+        if attempted_step_num is not None:
+            attempt_step = next(
+                (s for s in steps_taken if s.get("step") == attempted_step_num), None
+            )
+        if attempt_step is None:
+            for s in reversed(steps_taken[1:]):
+                if s.get("action") in ("click", "fill", "select", "navigate", "press_key"):
+                    attempt_step = s
+                    break
+
+        if not attempt_step:
+            return (
+                "INCONCLUSIVE",
+                f"No attempted action recorded for negative check: {mr.get('description')}",
+            )
+
+        if attempt_step.get("status") != "ok" or attempt_step.get("action") not in (
+            "click",
+            "fill",
+            "select",
+            "navigate",
+            "press_key",
+        ):
+            return (
+                "INCONCLUSIVE",
+                f"Attempted action in step {attempt_step.get('step')} failed at tool level",
+            )
+
+        after_text = attempt_step.get("visible_text_after") or obs.visible_text or ""
+        after_url = attempt_step.get("url_after") or obs.url or ""
+        norm_after_text = " ".join(after_text.split()).lower()
+        norm_after_url = after_url.lower()
+
+        if not norm_ev or (norm_ev not in norm_after_text and norm_ev not in norm_after_url):
+            return (
+                "INCONCLUSIVE",
+                (
+                    f"Evidence quote '{ev}' not found in after-state of "
+                    f"step {attempt_step.get('step')}"
+                ),
+            )
+
+        is_rejection = any(kw in norm_ev for kw in FORBIDDEN_KEYWORDS) or any(
+            kw in norm_after_text for kw in FORBIDDEN_KEYWORDS
+        )
+
+        if current_result == "PASSED":
+            if is_rejection:
+                return "PASSED", obs_text or "Prohibited action was correctly rejected"
+            else:
+                return "FAILED", (
+                    f"Prohibited action was permitted: attempt at step {attempt_step.get('step')} "
+                    f"resulted in normal state without 403 Forbidden or rejection message"
+                )
+        elif current_result == "FAILED":
+            return "FAILED", obs_text or "Check failed"
+        else:
+            return "INCONCLUSIVE", obs_text or "Check inconclusive"
+
+    # Positive check
+    norm_text = " ".join(obs.visible_text.split()).lower()
+    norm_url = obs.url.lower()
+    if current_result == "PASSED":
+        if not norm_ev or (norm_ev not in norm_text and norm_ev not in norm_url):
+            return "INCONCLUSIVE", f"Could not verify evidence on page: '{ev}'"
+        return "PASSED", obs_text or "Check passed"
+    elif current_result == "FAILED":
+        return "FAILED", obs_text or "Check failed"
+    else:
+        return "INCONCLUSIVE", obs_text or "Check inconclusive"
+
+
 async def execute_single_test_case(
     test_case: TestCase,
     target_url: str,
@@ -277,6 +417,8 @@ async def execute_single_test_case(
                 role=target_role,
             )
             login_step["test_key"] = getattr(test_case, "test_key", "")
+            login_step["visible_text_after"] = ""
+            login_step["url_after"] = target_url
             steps_taken.append(login_step)
             clean_login = sanitize_steps([login_step], secrets_to_redact)[0]
             logger.info(
@@ -641,39 +783,14 @@ Decide the next browser action, or finish if all checks are evaluated."""
                     norm_text = " ".join(obs.visible_text.split()).lower()
                     norm_url = obs.url.lower()
 
-                    # Find unverified PASSED checks
+                    # Find unverified checks candidate for correction round
                     unverified: list[dict[str, Any]] = []
                     for mr in matched_results:
-                        if mr["result"] == "PASSED":
-                            ev = mr["evidence"]
-                            norm_ev = " ".join(ev.split()).lower() if ev else ""
-                            if not norm_ev or (
-                                norm_ev not in norm_text and norm_ev not in norm_url
-                            ):
-                                unverified.append(mr)
-                                continue
-
-                            # Part 5(d): Negative check verification
-                            is_negative = any(
-                                kw in mr["description"].lower()
-                                for kw in [
-                                    "cannot",
-                                    "must not",
-                                    "prohibited",
-                                    "forbidden",
-                                    "should not",
-                                    "denied",
-                                    "prevented",
-                                    "not allowed",
-                                ]
-                            )
-                            if is_negative:
-                                has_attempt = any(
-                                    s.get("action") in ("click", "fill", "select", "navigate")
-                                    for s in steps_taken[1:]
-                                )
-                                if not has_attempt:
-                                    unverified.append(mr)
+                        cid = mr["check_id"]
+                        c_res = results_map.get(cid)
+                        eval_st, _ = evaluate_check_result(mr, c_res, steps_taken, obs)
+                        if eval_st == "INCONCLUSIVE" and mr["result"] == "PASSED":
+                            unverified.append(mr)
 
                     # Correction round for unverified checks
                     if unverified and not verdict_retried:
@@ -718,6 +835,9 @@ Decide the next browser action, or finish if all checks are evaluated."""
                                         mr["result"] = r.result
                                         mr["evidence"] = r.evidence
                                         mr["observation"] = r.observation
+                                results_map = {
+                                    cr.check_id: cr for cr in (decision.check_results or [])
+                                }
                         except Exception as corr_exc:
                             logger.warning(
                                 "[run_id=%s] Verdict correction round failed: %s",
@@ -725,37 +845,14 @@ Decide the next browser action, or finish if all checks are evaluated."""
                                 corr_exc,
                             )
 
-                    # After correction round: any unverified PASSED check becomes INCONCLUSIVE
+                    # After correction round: apply authoritative evaluation without LLM calls
                     for mr in matched_results:
-                        if mr["result"] == "PASSED":
-                            ev = mr["evidence"]
-                            norm_ev = " ".join(ev.split()).lower() if ev else ""
-                            is_negative = any(
-                                kw in mr["description"].lower()
-                                for kw in [
-                                    "cannot",
-                                    "must not",
-                                    "prohibited",
-                                    "forbidden",
-                                    "should not",
-                                    "denied",
-                                    "prevented",
-                                    "not allowed",
-                                ]
-                            )
-                            has_attempt = any(
-                                s.get("action") in ("click", "fill", "select", "navigate")
-                                for s in steps_taken[1:]
-                            )
-                            if (
-                                not norm_ev
-                                or (norm_ev not in norm_text and norm_ev not in norm_url)
-                                or (is_negative and not has_attempt)
-                            ):
-                                mr["result"] = "INCONCLUSIVE"
-                                mr["observation"] = (
-                                    f"Could not verify evidence on page: '{mr['evidence']}'"
-                                )
+                        cid = mr["check_id"]
+                        c_res = results_map.get(cid)
+                        eval_res, eval_obs = evaluate_check_result(mr, c_res, steps_taken, obs)
+                        mr["result"] = eval_res
+                        if eval_obs:
+                            mr["observation"] = eval_obs
 
                     # Part 5(c): Test verdict logic
                     has_failed = any(mr["result"] == "FAILED" for mr in matched_results)
@@ -927,6 +1024,8 @@ Decide the next browser action, or finish if all checks are evaluated."""
                 else:
                     consecutive_no_progress = 0
 
+                step_entry["visible_text_after"] = obs.visible_text
+                step_entry["url_after"] = obs.url
                 steps_taken.append(step_entry)
                 clean_step = sanitize_steps([step_entry], secrets_to_redact)[0]
                 short_step_res = (
