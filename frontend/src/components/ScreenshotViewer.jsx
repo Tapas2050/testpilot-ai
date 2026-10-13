@@ -4,11 +4,22 @@ import { api } from '../api/client';
 export function ScreenshotViewer({
   runId,
   filename,
+  screenshotPath,
   reason = null,
   caption = 'Screenshot Evidence',
 }) {
+  let effectiveRunId = runId;
+  let effectiveFilename = filename;
+  if (!effectiveRunId && screenshotPath) {
+    const parts = screenshotPath.split(/[\\/]/).filter(Boolean);
+    if (parts.length >= 2) {
+      effectiveFilename = parts[parts.length - 1];
+      effectiveRunId = parts[parts.length - 2];
+    }
+  }
+
   const [imageUrl, setImageUrl] = useState(null);
-  const [loading, setLoading] = useState(!!(runId && filename));
+  const [loading, setLoading] = useState(!!(effectiveRunId && effectiveFilename));
   const [error, setError] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -16,7 +27,8 @@ export function ScreenshotViewer({
     let active = true;
     let objectUrl = null;
 
-    if (!runId || !filename) {
+    if (!effectiveRunId || !effectiveFilename) {
+      setLoading(false);
       return;
     }
 
@@ -24,7 +36,7 @@ export function ScreenshotViewer({
       try {
         setLoading(true);
         setError(false);
-        const blob = await api.runs.fetchScreenshotBlob(runId, filename);
+        const blob = await api.runs.fetchScreenshotBlob(effectiveRunId, effectiveFilename);
         if (!active) return;
         objectUrl = URL.createObjectURL(blob);
         setImageUrl(objectUrl);
@@ -43,7 +55,7 @@ export function ScreenshotViewer({
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [runId, filename]);
+  }, [effectiveRunId, effectiveFilename]);
 
   if (loading) {
     return (
@@ -67,7 +79,7 @@ export function ScreenshotViewer({
     );
   }
 
-  if (!filename) {
+  if (!effectiveFilename) {
     return (
       <div
         data-testid="screenshot-missing"
@@ -247,3 +259,5 @@ export function ScreenshotViewer({
     </>
   );
 }
+
+export default ScreenshotViewer;

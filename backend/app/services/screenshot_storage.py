@@ -58,6 +58,9 @@ def get_screenshots_dir_for_run(run_id: Union[uuid.UUID, str]) -> Path:
     return run_dir
 
 
+get_run_screenshots_dir = get_screenshots_dir_for_run
+
+
 def get_relative_screenshot_path(run_id: Union[uuid.UUID, str], filename: str) -> str:
     """Return the canonical database path for a screenshot (screenshots/{run_id}/{filename})."""
     clean_name = Path(filename).name

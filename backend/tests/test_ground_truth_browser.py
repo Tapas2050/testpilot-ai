@@ -31,6 +31,7 @@ from app.agent.executor import CheckResult, ExecutorAction, execute_single_test_
 from app.agent.llm import set_mock_llm
 from app.agent.mcp_client import PlaywrightMCPClient, kill_process_tree
 from app.models.test_run import TestCase
+from app.services.screenshot_storage import get_storage_root
 
 logger = logging.getLogger(__name__)
 
@@ -616,16 +617,21 @@ SCENARIOS = [
 
 @pytest.mark.browser
 @pytest.mark.asyncio
-async def test_part7_scripted_ground_truth_defects_on(tmp_path: Path):
+async def test_part7_scripted_ground_truth_defects_on(client: httpx.AsyncClient, auth_headers):
     """Part 7: Execute 7 scenarios with SUPPORTDESK_DEFECTS=on using real Playwright MCP."""
+    headers, user_id, proj_id = auth_headers
+    run_resp = await client.post(f"/projects/{proj_id}/runs", headers=headers)
+    assert run_resp.status_code == 201
+    run_id = uuid.UUID(run_resp.json()["id"])
+
     async with run_supportdesk_server(defects_mode="on"):
         credentials = get_test_credentials()
-        run_id = uuid.uuid4()
 
         mcp_client = PlaywrightMCPClient(is_mock=False)
         await mcp_client.start()
 
         verdicts = {}
+        screenshot_sizes = {}
         try:
             for scenario in SCENARIOS:
                 tc, actions = get_scenario_plan_and_actions(scenario, defects_mode="on")
@@ -638,12 +644,52 @@ async def test_part7_scripted_ground_truth_defects_on(tmp_path: Path):
                     credentials=credentials,
                     mcp_client=mcp_client,
                     run_id=run_id,
-                    storage_dir=tmp_path,
+                    storage_dir=get_storage_root(),
                 )
                 verdicts[scenario] = result.status
+
+                # Assert screenshot exists on disk and is valid PNG >= 1000 bytes
+                assert result.screenshot_path is not None, f"Screenshot missing for {scenario}"
+                final_disk_file = get_storage_root() / result.screenshot_path
+                assert final_disk_file.exists(), f"File does not exist: {final_disk_file}"
+                final_size = final_disk_file.stat().st_size
+                assert final_size >= 1000, (
+                    f"Screenshot too small ({final_size} bytes): {final_disk_file}"
+                )
+                screenshot_sizes[f"{scenario}_final"] = final_size
+
+                # Assert served by evidence endpoint with HTTP 200 image/png
+                endpoint_resp = await client.get(
+                    f"/runs/{run_id}/screenshots/{final_disk_file.name}",
+                    headers=headers,
+                )
+                assert endpoint_resp.status_code == 200
+                assert endpoint_resp.headers["content-type"] == "image/png"
+                assert len(endpoint_resp.content) == final_size
+
+                # If failed, verify failure-moment screenshot as well
+                if result.status == "FAILED":
+                    assert result.failure_screenshot_path is not None, (
+                        f"Failure screenshot missing for {scenario}"
+                    )
+                    fail_disk_file = get_storage_root() / result.failure_screenshot_path
+                    assert fail_disk_file.exists(), f"Failure file does not exist: {fail_disk_file}"
+                    fail_size = fail_disk_file.stat().st_size
+                    assert fail_size >= 1000, f"Failure screenshot too small ({fail_size} bytes)"
+                    screenshot_sizes[f"{scenario}_failure"] = fail_size
+
+                    fail_resp = await client.get(
+                        f"/runs/{run_id}/screenshots/{fail_disk_file.name}",
+                        headers=headers,
+                    )
+                    assert fail_resp.status_code == 200
+                    assert fail_resp.headers["content-type"] == "image/png"
+                    assert len(fail_resp.content) == fail_size
         finally:
             set_mock_llm(None)
             await mcp_client.close()
+
+        logger.info("Defects ON screenshot sizes: %s", screenshot_sizes)
 
         # Expected verdicts with defects ON:
         assert verdicts["agent_cannot_delete"] == "FAILED"
@@ -657,16 +703,21 @@ async def test_part7_scripted_ground_truth_defects_on(tmp_path: Path):
 
 @pytest.mark.browser
 @pytest.mark.asyncio
-async def test_part7_scripted_ground_truth_defects_off(tmp_path: Path):
+async def test_part7_scripted_ground_truth_defects_off(client: httpx.AsyncClient, auth_headers):
     """Part 7: Execute 7 scenarios with SUPPORTDESK_DEFECTS=off using real Playwright MCP."""
+    headers, user_id, proj_id = auth_headers
+    run_resp = await client.post(f"/projects/{proj_id}/runs", headers=headers)
+    assert run_resp.status_code == 201
+    run_id = uuid.UUID(run_resp.json()["id"])
+
     async with run_supportdesk_server(defects_mode="off"):
         credentials = get_test_credentials()
-        run_id = uuid.uuid4()
 
         mcp_client = PlaywrightMCPClient(is_mock=False)
         await mcp_client.start()
 
         verdicts = {}
+        screenshot_sizes = {}
         try:
             for scenario in SCENARIOS:
                 tc, actions = get_scenario_plan_and_actions(scenario, defects_mode="off")
@@ -679,12 +730,33 @@ async def test_part7_scripted_ground_truth_defects_off(tmp_path: Path):
                     credentials=credentials,
                     mcp_client=mcp_client,
                     run_id=run_id,
-                    storage_dir=tmp_path,
+                    storage_dir=get_storage_root(),
                 )
                 verdicts[scenario] = result.status
+
+                # Assert screenshot exists on disk and is valid PNG >= 1000 bytes
+                assert result.screenshot_path is not None, f"Screenshot missing for {scenario}"
+                final_disk_file = get_storage_root() / result.screenshot_path
+                assert final_disk_file.exists(), f"File does not exist: {final_disk_file}"
+                final_size = final_disk_file.stat().st_size
+                assert final_size >= 1000, (
+                    f"Screenshot too small ({final_size} bytes): {final_disk_file}"
+                )
+                screenshot_sizes[f"{scenario}_final"] = final_size
+
+                # Assert served by evidence endpoint with HTTP 200 image/png
+                endpoint_resp = await client.get(
+                    f"/runs/{run_id}/screenshots/{final_disk_file.name}",
+                    headers=headers,
+                )
+                assert endpoint_resp.status_code == 200
+                assert endpoint_resp.headers["content-type"] == "image/png"
+                assert len(endpoint_resp.content) == final_size
         finally:
             set_mock_llm(None)
             await mcp_client.close()
+
+        logger.info("Defects OFF screenshot sizes: %s", screenshot_sizes)
 
         # Expected verdicts with defects OFF:
         for scenario in SCENARIOS:
