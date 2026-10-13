@@ -163,3 +163,13 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] Part 5: SupportDesk 500 investigation and fix (fixed status parameter shadowing in supportdesk/app/main.py with status_code=303, preserved 3 planted defects, added correct/defective build tests, reseeded supportdesk.db)
 - [x] Part 6: Housekeeping (verified storage/ in .gitignore, README.md screenshot section, SCREENSHOT_RETENTION_DAYS=14 with startup cleanup, updated MEMORY.md, DECISIONS.md, TASKS.md, TEST_PLAN.md)
 
+## Live Status Reliability, Negative Check Verification, TC Numbering, and Run Review Script
+- [x] Part 1: Diagnose stuck "Planning" screen across 3 layers (worker stage write, GET /runs/{id} caching, React useRunStatus hook), reproduce with automated stage progression test (D-041)
+- [x] Part 2: Make live status reliable with single authoritative helper update_run_stage_and_status (DB first, then Redis), Cache-Control: no-store on API, frontend monotonic order check and 60s stall notice, server_time aligned elapsed timer (D-041)
+- [x] Part 3: Investigate missed agent-deletion defect REQ-SEC-02 in run 3098e2d6 (read-only DB queries show executor attempted delete, SupportDesk redirected 303, executor misread "Support Tickets" after-state as prohibition)
+- [x] Part 4: Strengthen negative checks in executor with deterministic evaluate_check_result (verify attempted step, tool success, after-state DOM, explicit rejection keywords; force FAILED on unrejected actions, INCONCLUSIVE on unattempted actions), verify with real Playwright MCP ground-truth browser test on port 8001 (defects ON fails, defects OFF passes, D-042)
+- [x] Part 5: Fix test numbering to consistently start at TC-1 across API, run page, and report (0-based planner indexing, dynamic min_order legacy offset correction), automated test (D-043)
+- [x] Part 6: Create read-only run review evaluation tool backend/scripts/review_run.py with --expect-supportdesk-defects flag and fixture row tests (D-044)
+- [x] Part 7: Housekeeping (update MEMORY.md, DECISIONS.md, TASKS.md, TEST_PLAN.md, keep Docker out of all instructions)
+
+

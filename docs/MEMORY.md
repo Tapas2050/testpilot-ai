@@ -18,8 +18,8 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Screenshot Evidence Reliability & SupportDesk Unplanted Bug Investigation (Completed)
-- Status: Reliable screenshot pipeline end-to-end (absolute repo-relative storage, viewport captures, failure-moment and test-end captures, base64 and timestamp normalization, disk validation, secure authenticated serving, frontend thumbnail/modal/fallback, retention cleanup). SupportDesk status update 500 bug fixed and tested across both correct and defective builds. All 166 backend tests, 2 browser ground-truth tests, and 29 frontend tests passing cleanly.
+- Current phase: Live Status Reliability, Negative Check Verification, TC Numbering, and Review Script (Completed)
+- Status: Live status progression is reliable and synchronized across DB, Redis, API (Cache-Control: no-store, server_time), and frontend stepper/timer. Negative check verification deterministically catches prohibited actions succeeding without rejection (fixing the missed agent-deletion defect REQ-SEC-02). Test keys consistently start at TC-1. Read-only review script `backend/scripts/review_run.py` evaluates run stats and ground truth defect matches. All 173 backend tests, 2 browser ground-truth tests, 5 supportdesk tests, and 32 frontend vitest tests passing cleanly.
 - Date of last update: 2026-10-13
 
 ## 4. Environment Facts (verified)
@@ -27,14 +27,14 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - Host OS: Windows 11. Postgres 18.6 installed locally; pgvector 0.8.5 installed and active in database `testpilot`. Alembic migrations applied to `testpilot`.
 - Redis installed in WSL2 Ubuntu, configured to bind `0.0.0.0 ::1` with `protected-mode no`. Accessible at `localhost:6379`. WSL kept alive with background process to prevent idle suspension.
 - Verified on host: uv 0.12.8, Python 3.12.14 pinned via `uv`, Node v24.19.0, npm 11.17.0, Git 2.55.0.
-- Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 29 passed across 7 test files (including ScreenshotViewer tests).
+- Vite 8.3.4 + React in `frontend/`. Vitest jsdom tests: 32 passed across 8 test files.
 - SupportDesk demo target in `supportdesk/`: FastAPI + SQLite, seeded with 5 tickets (IDs 1-5), toggleable planted defects via `SUPPORTDESK_DEFECTS`. Status/assignee update route fixed (`status_code=303`) and verified with 5 tests passing in both modes.
-- SupportDesk ground-truth browser verification (`test_ground_truth_browser.py`): all 7 scenarios verified with real Playwright MCP against SupportDesk with defects ON (3 defects caught, 10 screenshots on disk >= 1000 bytes served with HTTP 200) and defects OFF (all 7 passing, 7 screenshots verified).
+- SupportDesk ground-truth browser verification (`test_ground_truth_browser.py`): all 7 scenarios verified with real Playwright MCP against SupportDesk with defects ON (agent cannot delete correctly evaluated to FAILED, 3 defects caught) and defects OFF (all 7 passing).
 - MCP Server Package: `@executeautomation/playwright-mcp-server` pinned to `1.0.12` in `mcp/package.json`. Launched directly with `node` and entrypoint `mcp/node_modules/@executeautomation/playwright-mcp-server/dist/index.js` with explicit `cwd=mcp`.
 - Screenshot Storage: Located at `<repo_root>/storage/screenshots/{run_id}/`. Disk files: `{test_case_id}.png` (final state) and `{test_case_id}-failure.png` (moment of failure).
 - Screenshot Retention: Default 14 days (`SCREENSHOT_RETENTION_DAYS=14`), cleaned automatically on worker startup.
-- Test counts: 166 backend unit/integration tests passing (+ 1 skipped, 2 deselected live eval, 2 browser tests) + 5 supportdesk tests + 29 frontend tests.
-- Ruff clean on backend and supportdesk; lint clean on frontend.
+- Test counts: 173 backend unit/integration tests passing (+ 1 skipped, 2 deselected live eval, 2 browser tests) + 5 supportdesk tests + 32 frontend tests.
+- Ruff clean on backend, scripts, and supportdesk; lint clean on frontend.
 
 ## 5. Conventions in Use
 - uv project inside `backend/` with `[tool.uv] package = false`.
@@ -52,7 +52,12 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - Health check route: `GET /health` on port 8000 (verifies API, DB with pgvector, and Redis).
 - Single-role test cases: each test case targets exactly ONE role and 1 to 4 checks (`TestCase.checks` JSONB column).
 - Action validation: navigate requires url, click requires selector, fill/select require selector + value, press_key requires key. Missing required fields trigger a single re-prompt and do not count toward step limit.
-- Per-check evidence verification: finish action returns `check_results` mapping each planned check to PASSED/FAILED/INCONCLUSIVE, evidence quote, and >= 20-char observation. PASSED checks must have evidence verified against DOM text or URL. Negative checks must attempt the forbidden action and extract evidence from the after-state.
+- Per-check evidence verification: finish action returns `check_results` mapping each planned check to PASSED/FAILED/INCONCLUSIVE, evidence quote, and >= 20-char observation. PASSED checks must have evidence verified against DOM text or URL.
+- Negative-check rule: An absent button or link is NOT proof of a protected action (if unattempted, check is INCONCLUSIVE / test BLOCKED). Executor attempts the action and cites the step in `attempted_step`. Code verification `evaluate_check_result` deterministically verifies tool success and after-state DOM text: if the action succeeded without rejection keywords (`forbidden`, `403`, `denied`), verdict is forced to FAILED (prohibited action permitted). Only marks PASSED if explicit rejection is proven in evidence.
+- Single Authoritative Status Helper: `update_run_stage_and_status` writes DB row first and then Redis (`run_status` and `run_progress`). All transitions (PREFLIGHT, PLANNING, EXECUTING, ANALYZING, REPORTING, COMPLETED, FAILED, CANCELLED) use this helper.
+- Run Status API: `GET /runs/{id}` returns database row merged with Redis live progress, sends `Cache-Control: no-store`, and includes `server_time`, `updated_at`, `stage`, `current_test_key`, `current_step`, `tests_done`, `tests_total`.
+- Test Key Numbering: Test cases use 0-indexed `order_index` (0..N-1), formatted as `TC-{order_index + 1}`. Legacy runs with 1-indexed `order_index` are detected via `min_order == 1` and formatted as `TC-{order_index}`, guaranteeing every run starts at `TC-1` and is sequential across API, run page, and report.
+- Run Review Script: `backend/scripts/review_run.py` evaluates run stats, test cases, screenshots, and ground truth defect matches (`--expect-supportdesk-defects`). Read-only, no secrets printed or copied.
 - Verdict rule: PASSED only if every check is PASSED with verified evidence. Any FAILED check makes test FAILED. Any INCONCLUSIVE check makes test BLOCKED.
 - Deterministic Expected & Observed failure details: expected from `expected_result`, observed from final observation, quote, and last page state.
 - Live LLM calls tracking: live calls tracked via `get_live_call_count()`, persisted in run report JSON and displayed in UI.
@@ -66,6 +71,9 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - NPM commands on Windows PowerShell use `npm.cmd` / `npx.cmd` to bypass script execution policy restrictions.
 
 ## 6. Gotchas and Lessons
+- Stuck "Planning" Screen Root Cause: The frontend stepper derived from `run.stage`. The worker was updating stage transitions only in Redis `run_progress` while `test_runs` row in Postgres remained with `stage="PLANNING"`. `GET /runs/{id}` only read the DB row and had no `Cache-Control: no-store`, so the frontend polled and stayed stuck on Planning until completion. Solved with single authoritative `update_run_stage_and_status` writing DB first, then Redis, merged in `GET /runs/{id}`, and Cache-Control: no-store.
+- Missed Agent Deletion Defect Root Cause: SupportDesk renders `#delete-ticket-btn` unconditionally for all users on `/tickets/{id}`. When `SUPPORTDESK_DEFECTS=on`, deletion succeeded and redirected 303 to `/tickets`. The LLM executor landed on `/tickets`, saw "Support Tickets" header, and misjudged the absence of a delete button on the list page as prohibition: claiming PASSED. Solved with deterministic code-level verification in `evaluate_check_result`: requiring explicit rejection keywords in after-state evidence and forcing FAILED if the prohibited action succeeded without rejection.
+- Missing TC-1 Numbering Root Cause: Planner was indexing test cases with `enumerate(..., start=1)`, storing `order_index = 1..11`. The API was generating `test_key` as `f"TC-{tc.order_index + 1}"`, turning index 1 into `TC-2` and omitting `TC-1`. Solved by setting planner `start=0` and adding `min_order` normalization across `graph.py` and `runs.py`.
 - Missing Screenshots Root Cause: Relative `STORAGE_DIR` resolved to different locations for worker (`backend/storage`) vs API (`storage`), and MCP client ran with cwd `mcp/node_modules` creating `mcp/node_modules/storage/screenshots/...`. Furthermore, `@executeautomation/playwright-mcp-server` appends `-${timestamp}.png`, causing filename mismatches with database-stored paths. Centralized `screenshot_storage.py` resolves one absolute path against `ROOT_DIR`, renames timestamped output to canonical target, and validates 8-byte PNG magic + size boundaries.
 - SupportDesk 500 Root Cause: In `supportdesk/app/main.py:467`, parameter `status: str = Form(...)` shadowed FastAPI's `from fastapi import status` module. Line 478 `status.HTTP_303_SEE_OTHER` crashed with `AttributeError: 'str' object has no attribute 'HTTP_303_SEE_OTHER'`. Fixed by specifying `status_code=303` directly.
 - WSL2 Idle Suspension: In Windows 11, WSL2 instances automatically stop background systemd services when all foreground sessions close. Keeping a background daemon (`wsl sleep infinity`) prevents Redis disconnections. Additionally, Redis must bind `0.0.0.0 ::1` with `protected-mode no` so connections from Windows `localhost` (which resolve to IPv6 `::1` first) succeed reliably.

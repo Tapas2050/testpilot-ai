@@ -154,6 +154,14 @@ Phase 19 (Reliable Screenshot Evidence Pipeline & SupportDesk Status Fix)
 - T19.5 SupportDesk Status & Assignee Form Fix: Fixed unplanted 500 error in supportdesk/app/main.py:478 caused by Form parameter name 'status' shadowing FastAPI's status module. Preserves 3 planted defects intact and verified with automated test test_status_and_assignee_update_web_form (defects ON and OFF).
 - T19.6 Ground-Truth Browser Screenshot Evidence: test_ground_truth_browser.py asserts physical screenshot files on disk >= 1000 bytes and valid HTTP 200 image/png responses for all 7 scenarios under both defects ON (10 PNGs including failure moments) and defects OFF (7 PNGs).
 
+Phase 20 (Live Status Reliability, Negative Check Verification, TC-1 Numbering, and Run Review Tool)
+- T20.1 Live Status Progression & Headers: `test_live_status_repro.py` asserts that pipeline stages (PREFLIGHT, PLANNING, EXECUTING, ANALYZING, REPORTING, COMPLETED) appear in sequential order when polled via GET /runs/{id}, verifies that stage transitions write DB row first and then Redis, and confirms `Cache-Control: no-store` and `server_time` are returned.
+- T20.2 Frontend Hook Live Status: `use_run_status_live.test.jsx` verifies hook polls every 2 seconds, updates stage sequentially, ignores stale out-of-order responses, and sets stall notice after 60 seconds without updates.
+- T20.3 Negative Check Verification: `test_negative_check_verification.py` verifies deterministic verdict rules (without LLM calls): if a prohibited action succeeds without rejection (redirects to tickets list), the check is forced to FAILED; if explicitly rejected (403 Forbidden), it PASSES; if unattempted, it is marked INCONCLUSIVE and the test is BLOCKED.
+- T20.4 Real-Browser Ground-Truth Check: `test_ground_truth_browser.py` verifies with real Playwright MCP clicks that the agent-delete check FAILED with defects ON and PASSED with defects OFF.
+- T20.5 Test Key Numbering Starting at TC-1: `test_run_execution_details.py` verifies `test_key` starts at TC-1 and remains consecutive across API, run page, and report for both 0-indexed runs and legacy 1-indexed runs.
+- T20.6 Run Review Tool & Ground-Truth Evaluation: `test_review_run.py` tests `backend/scripts/review_run.py` with fixture rows: verifies summary stats, duration, live LLM calls, test key formatting, observation truncation (<= 160 chars), screenshot status, and `--expect-supportdesk-defects` ground-truth defect comparison table.
+
 ## 4. Agent Quality Metrics (record in MEMORY.md after each eval run)
 - Planned tests traceable to a requirement: target 100 percent
 - Planted defects found on the defective build: target 3 of 3

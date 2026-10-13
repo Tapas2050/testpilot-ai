@@ -332,3 +332,48 @@ Decision:
   * Frontend fetches authenticated blob with authorization headers, converts to object URL (revoked on unmount), displays thumbnail and modal view, and renders clear fallback with reason instead of generic errors.
   * Retention management: `SCREENSHOT_RETENTION_DAYS` (default 14 days), automatically pruned on worker startup.
 Consequences: Screenshot evidence is deterministic, validated on disk, securely served, authenticated in UI, and automatically lifecycle-managed.
+
+## D-041 Authoritative Helper for Live Status and Stage Transitions
+Status: Accepted
+Context: During a real manual run, the frontend UI remained on the "Planning" stage while the worker logs showed tests actively executing and analyzing. The root cause was dual: (1) stage transitions were only written to Redis `run_progress` and not committed to the PostgreSQL `test_runs` row; (2) `GET /runs/{id}` only read the DB row without HTTP `Cache-Control: no-store` headers, causing the frontend polling loop to receive stale cached "PLANNING" stage responses.
+Decision:
+- Single authoritative helper `update_run_stage_and_status` writes changes to the database row first (authoritative source), commits, and then updates Redis `run_status` and `run_progress`. No stage transition code path may bypass this helper.
+- `GET /runs/{id}` builds its response by reading the authoritative database row merged with Redis live progress and events, includes `server_time`, `updated_at`, `stage`, `current_test_key`, `current_step`, `tests_done`, `tests_total`, and always sets `Cache-Control: no-store`.
+- Frontend `useRunStatus.js` rejects stale out-of-order responses by checking monotonic `updated_at`, polls every 2 seconds while non-terminal, tracks last update time, and displays a gentle "Waiting for worker to report progress" notice if no updates arrive after 60 seconds of active execution.
+- Frontend stepper is derived strictly from API `stage` and `status`, and elapsed timer uses `server_time` and `started_at` to stay in sync with the server clock.
+Consequences: Live test execution progress is consistent, real-time, resilient to network jitter, and correctly reflects the active pipeline stage.
+
+## D-042 Deterministic Verification for Negative Checks and Prohibited Actions
+Status: Accepted
+Context: In real run 3098e2d6-d00f-41d4-a80c-2b977dc48a2b with `SUPPORTDESK_DEFECTS=on`, test TC-11 ("Support Agent Deletion Prohibition", REQ-SEC-02) ended with a false-positive PASSED verdict. Ground truth code inspection revealed SupportDesk renders `#delete-ticket-btn` unconditionally on ticket details. When clicked by an agent with defects ON, the backend deleted the ticket and redirected 303 to `/tickets`. The LLM executor landed on `/tickets`, saw the header "Support Tickets", and hallucinated that being redirected meant deletion was prevented because no delete button was visible on the tickets list.
+Decision:
+- Negative checks prompt directive: An absent button or link is NOT proof of a protected action. The executor must attempt the action if any control or form exists, record the step number in `attempted_step`, and extract evidence from the after-state. If the control does not exist for the role, report what was observed and mark INCONCLUSIVE rather than PASSED.
+- Deterministic code verification `evaluate_check_result` (zero LLM calls):
+  * Verifies that the cited attempt step exists and succeeded at the browser tool level.
+  * Verifies that after-state DOM text and URL were captured.
+  * Verifies evidence against the after-state: if the attempted action succeeded without explicit rejection keywords (`forbidden`, `403`, `access denied`, etc.), the verdict is forced to FAILED because the prohibited action was permitted.
+  * If explicit rejection is present in the after-state, the check PASSES.
+  * If no attempt was recorded, the check is marked INCONCLUSIVE and test status is BLOCKED.
+- Scripted real-browser ground-truth test: `test_ground_truth_browser.py` verifies with real Playwright MCP clicks that the agent-delete check FAILED with defects ON and PASSED with defects OFF.
+Consequences: Eliminates false-positive passes on security prohibition requirements; unrejected prohibited actions are deterministically caught and flagged as failures without adding LLM calls.
+
+## D-043 Sequential Test Key Numbering Starting at TC-1
+Status: Accepted
+Context: In real run 3098e2d6-d00f-41d4-a80c-2b977dc48a2b, test keys in the UI began at TC-2 and ran through TC-12, completely missing TC-1. The root cause was that planner agent initialized `TestCase` creation with `enumerate(..., start=1)`, storing `order_index = 1..11`. Later, API formatting logic used `f"TC-{tc.order_index + 1}"`, turning index 1 into `TC-2`.
+Decision:
+- Planner indexes test cases using standard 0-based indexing: `enumerate(..., start=0)`.
+- Test key calculation in `graph.py` and `runs.py` dynamically normalizes for legacy databases: `min_order = min((t.order_index for t in test_cases), default=0)`. If `min_order == 1` (legacy 1-based order), `f"TC-{tc.order_index}"`; if `min_order == 0`, `f"TC-{tc.order_index + 1}"`.
+- All test keys consistently start at `TC-1` and are consecutive across API endpoints (`/runs/{id}`, `/runs/{id}/report`), run page, and report page.
+Consequences: Test key numbering is uniform, starts at TC-1, and remains backwards-compatible with legacy stored runs.
+
+## D-044 Read-Only Run Review Evaluation Tool and Ground-Truth Verification
+Status: Accepted
+Context: Evaluating TestPilot runs across defect-enabled demo builds required manual SQL inspection or relying on browser UI screens.
+Decision:
+- Created standalone evaluation script `backend/scripts/review_run.py`.
+- Purely read-only: executes only SELECT queries, never prints or accesses credentials, secrets, or `.env` variables.
+- Outputs summary table containing run ID, status, duration, total live LLM calls, tests planned, test keys, roles, requirement IDs, final status, step count, final observation (truncated to 160 characters), and screenshot status.
+- Added `--expect-supportdesk-defects` flag comparing verdicts against known SupportDesk planted defects (`REQ-SEC-02`, `REQ-TKT-02`, `REQ-SRCH-01` must be FAILED; all other requirements PASSED), outputting MATCH/MISMATCH rows and defect counts (e.g. "Defects found: 3 of 3").
+- Explicitly isolated from agent runtime: expectation mapping is strictly for post-run evaluation and is prohibited from being referenced or imported by planner, executor, or analyst agent logic.
+Consequences: Fast, automated, reproducible CLI evaluation of TestPilot test runs against ground truth.
+
