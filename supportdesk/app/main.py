@@ -475,7 +475,7 @@ def update_ticket(
     """, (status, assignee or None, ticket_id))
     conn.commit()
     conn.close()
-    return RedirectResponse(url=f"/tickets/{ticket_id}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=f"/tickets/{ticket_id}", status_code=303)
 
 
 @app.post("/tickets/{ticket_id}/delete")

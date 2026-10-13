@@ -9,14 +9,14 @@ supportdesk_dir = Path(__file__).resolve().parent
 if str(supportdesk_dir) not in sys.path:
     sys.path.insert(0, str(supportdesk_dir))
 
-from app.config import get_settings
-from app.database import get_db_path, init_db
+from app.config import get_settings  # noqa: E402
+from app.database import get_db_path, init_db  # noqa: E402
 
 
 def reseed() -> None:
     """Reset SupportDesk database with fresh schema and seeded accounts from .env."""
     # Force settings evaluation to ensure passwords are valid
-    settings = get_settings()
+    _ = get_settings()
     db_path = get_db_path()
 
     if db_path.exists():

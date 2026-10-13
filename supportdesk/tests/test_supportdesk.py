@@ -248,27 +248,61 @@ def test_seeded_tickets_data(monkeypatch):
     assert any(t["id"] == 1 for t in search_pwd.json())
 
 
-def test_reproduce_status_and_assignee_update_web_form():
-    """Verify web form POST /tickets/{id}/update for status and assignee."""
+def test_status_and_assignee_update_web_form(monkeypatch):
+    """Verify web form POST /tickets/{id}/update for status and assignee as agent and admin."""
     from app.config import get_settings
-    settings = get_settings()
     from app.main import app
+    from app.database import get_connection
 
-    client = TestClient(app, follow_redirects=False)
+    for defects_val in ["off", "on"]:
+        monkeypatch.setenv("SUPPORTDESK_DEFECTS", defects_val)
+        get_settings.cache_clear()
+        settings = get_settings()
+        client = TestClient(app, follow_redirects=False)
 
-    # Login via web form
-    login_resp = client.post(
-        "/login",
-        data={"email": settings.SUPPORTDESK_AGENT_EMAIL, "password": settings.SUPPORTDESK_AGENT_PASSWORD},
-    )
-    assert login_resp.status_code == 303
+        # 1. Agent login & update
+        login_resp = client.post(
+            "/login",
+            data={"email": settings.SUPPORTDESK_AGENT_EMAIL, "password": settings.SUPPORTDESK_AGENT_PASSWORD},
+        )
+        assert login_resp.status_code == 303
 
-    # Reproduce: Update ticket #1 status currently raises AttributeError due to status shadowing
-    with pytest.raises(AttributeError, match="'str' object has no attribute 'HTTP_303_SEE_OTHER'"):
-        client.post(
+        update_resp = client.post(
             "/tickets/1/update",
             data={"status": "IN_PROGRESS", "assignee": settings.SUPPORTDESK_AGENT_EMAIL},
         )
+        assert update_resp.status_code == 303
+        assert update_resp.headers["location"] == "/tickets/1"
+
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT status, assignee FROM tickets WHERE id = 1")
+        row = c.fetchone()
+        conn.close()
+        assert row["status"] == "IN_PROGRESS"
+        assert row["assignee"] == settings.SUPPORTDESK_AGENT_EMAIL
+
+        # 2. Admin login & update
+        admin_login = client.post(
+            "/login",
+            data={"email": settings.SUPPORTDESK_ADMIN_EMAIL, "password": settings.SUPPORTDESK_ADMIN_PASSWORD},
+        )
+        assert admin_login.status_code == 303
+
+        update_admin = client.post(
+            "/tickets/1/update",
+            data={"status": "RESOLVED", "assignee": settings.SUPPORTDESK_ADMIN_EMAIL},
+        )
+        assert update_admin.status_code == 303
+        assert update_admin.headers["location"] == "/tickets/1"
+
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT status, assignee FROM tickets WHERE id = 1")
+        row = c.fetchone()
+        conn.close()
+        assert row["status"] == "RESOLVED"
+        assert row["assignee"] == settings.SUPPORTDESK_ADMIN_EMAIL
 
 
 
