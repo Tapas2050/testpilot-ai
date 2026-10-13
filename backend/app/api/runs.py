@@ -109,6 +109,8 @@ def extract_execution_details(res: Any) -> dict[str, Any]:
         "steps": sanitized,
         "duration_seconds": getattr(res, "duration_seconds", None),
         "screenshot_path": getattr(res, "screenshot_path", None),
+        "failure_screenshot_path": getattr(res, "failure_screenshot_path", None),
+        "screenshot_error": getattr(res, "screenshot_error", None),
         "evidence": evidence,
         "final_observation": final_obs,
         "check_results": check_results,
@@ -126,6 +128,8 @@ class TestResultResponse(BaseModel):
     steps: Optional[list[dict[str, Any]]] = None
     duration_seconds: Optional[float] = None
     screenshot_path: Optional[str] = None
+    failure_screenshot_path: Optional[str] = None
+    screenshot_error: Optional[str] = None
     evidence: Optional[str] = None
     final_observation: Optional[str] = None
     check_results: Optional[list[dict[str, Any]]] = None
@@ -148,6 +152,8 @@ class TestCaseResponse(BaseModel):
     steps: Optional[list[dict[str, Any]]] = None
     duration_seconds: Optional[float] = None
     screenshot_path: Optional[str] = None
+    failure_screenshot_path: Optional[str] = None
+    screenshot_error: Optional[str] = None
     evidence: Optional[str] = None
     final_observation: Optional[str] = None
 
@@ -315,6 +321,8 @@ async def get_test_run(
                         steps=r_details["steps"],
                         duration_seconds=r_details["duration_seconds"],
                         screenshot_path=r_details["screenshot_path"],
+                        failure_screenshot_path=r_details["failure_screenshot_path"],
+                        screenshot_error=r_details["screenshot_error"],
                         evidence=r_details["evidence"],
                         final_observation=r_details["final_observation"],
                         check_results=r_details["check_results"],
@@ -357,6 +365,8 @@ async def get_test_run(
                 steps=details["steps"],
                 duration_seconds=details["duration_seconds"],
                 screenshot_path=details["screenshot_path"],
+                failure_screenshot_path=details["failure_screenshot_path"],
+                screenshot_error=details["screenshot_error"],
                 evidence=details["evidence"],
                 final_observation=details["final_observation"],
             )
@@ -561,6 +571,8 @@ async def get_test_run_report(
                 "steps": details["steps"],
                 "duration_seconds": details["duration_seconds"],
                 "screenshot_path": details["screenshot_path"],
+                "failure_screenshot_path": details["failure_screenshot_path"],
+                "screenshot_error": details["screenshot_error"],
                 "evidence": details["evidence"],
                 "final_observation": details["final_observation"],
             })
@@ -573,6 +585,8 @@ async def get_test_run_report(
                     "steps": details["steps"],
                     "duration_seconds": details["duration_seconds"],
                     "screenshot_path": details["screenshot_path"],
+                    "failure_screenshot_path": details["failure_screenshot_path"],
+                    "screenshot_error": details["screenshot_error"],
                     "evidence": details["evidence"],
                     "final_observation": details["final_observation"],
                     "check_results": details["check_results"],
@@ -591,13 +605,14 @@ async def get_run_screenshot(
     db: AsyncSession = Depends(get_db),
 ):
     """Serve authenticated test screenshot evidence."""
-    from pathlib import Path
-
     from fastapi.responses import FileResponse
 
-    from app.core.config import get_settings
+    from app.services.screenshot_storage import (
+        FILENAME_PATTERN,
+        resolve_screenshot_file,
+    )
 
-    # Verify run ownership
+    # Verify run ownership - cross-user access returns 404
     stmt = (
         select(TestRun)
         .join(Project, TestRun.project_id == Project.id)
@@ -610,20 +625,28 @@ async def get_run_screenshot(
             detail="Test run not found",
         )
 
-    # Sanitize filename against directory traversal
-    clean_name = Path(filename).name
-    if not clean_name.endswith(".png"):
+    # Validate filename pattern and strictly reject directory traversal
+    if (
+        not filename
+        or not FILENAME_PATTERN.match(filename)
+        or "/" in filename
+        or "\\" in filename
+        or ".." in filename
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid screenshot file format",
+            detail="Invalid screenshot filename format",
         )
 
-    settings = get_settings()
-    file_path = Path(settings.STORAGE_DIR) / "screenshots" / str(run_id) / clean_name
-    if not file_path.exists() or not file_path.is_file():
+    target_file = resolve_screenshot_file(run_id, filename)
+    if not target_file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Screenshot evidence not found",
         )
 
-    return FileResponse(file_path, media_type="image/png")
+    return FileResponse(
+        target_file,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=300"},
+    )

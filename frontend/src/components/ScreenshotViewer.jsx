@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client';
 
-export function ScreenshotViewer({ runId, filename, caption = 'Screenshot Evidence' }) {
+export function ScreenshotViewer({
+  runId,
+  filename,
+  reason = null,
+  caption = 'Screenshot Evidence',
+}) {
   const [imageUrl, setImageUrl] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!!(runId && filename));
   const [error, setError] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -11,25 +16,28 @@ export function ScreenshotViewer({ runId, filename, caption = 'Screenshot Eviden
     let active = true;
     let objectUrl = null;
 
+    if (!runId || !filename) {
+      return;
+    }
+
     async function loadScreenshot() {
       try {
         setLoading(true);
+        setError(false);
         const blob = await api.runs.fetchScreenshotBlob(runId, filename);
         if (!active) return;
         objectUrl = URL.createObjectURL(blob);
         setImageUrl(objectUrl);
-        setError(false);
       } catch {
         if (!active) return;
         setError(true);
+        setImageUrl(null);
       } finally {
         if (active) setLoading(false);
       }
     }
 
-    if (runId && filename) {
-      loadScreenshot();
-    }
+    loadScreenshot();
 
     return () => {
       active = false;
@@ -59,24 +67,58 @@ export function ScreenshotViewer({ runId, filename, caption = 'Screenshot Eviden
     );
   }
 
+  if (!filename) {
+    return (
+      <div
+        data-testid="screenshot-missing"
+        style={{
+          minWidth: '140px',
+          maxWidth: '220px',
+          padding: '8px 12px',
+          backgroundColor: '#F8FAFC',
+          border: '1px dashed #CBD5E1',
+          borderRadius: '6px',
+          fontSize: '11px',
+          color: '#64748B',
+          lineHeight: '1.4',
+        }}
+      >
+        <div>No screenshot was captured for this test</div>
+        {reason && (
+          <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '2px' }}>
+            {reason}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (error || !imageUrl) {
     return (
       <div
         data-testid="screenshot-error"
         style={{
-          width: '120px',
-          height: '80px',
+          minWidth: '140px',
+          maxWidth: '220px',
+          padding: '8px 12px',
           backgroundColor: '#FEF2F2',
           border: '1px solid #FECACA',
           borderRadius: '6px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
           fontSize: '11px',
-          color: '#DC2626',
+          color: '#991B1B',
+          lineHeight: '1.4',
         }}
       >
-        Screenshot failed
+        <div>No screenshot was captured for this test</div>
+        {reason ? (
+          <div style={{ fontSize: '10px', color: '#B91C1C', marginTop: '2px' }}>
+            {reason}
+          </div>
+        ) : (
+          <div style={{ fontSize: '10px', color: '#B91C1C', marginTop: '2px' }}>
+            File missing or request failed
+          </div>
+        )}
       </div>
     );
   }

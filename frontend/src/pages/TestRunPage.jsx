@@ -850,6 +850,8 @@ export function TestRunPage() {
                           const finalObs = res?.final_observation || tc.final_observation || res?.observations;
                           const evidenceQuote = res?.evidence || tc.evidence;
                           const screenshotPath = res?.screenshot_path || tc.screenshot_path || (res?.evidence_paths && res.evidence_paths[0]);
+                          const failureScreenshotPath = res?.failure_screenshot_path || tc.failure_screenshot_path;
+                          const screenshotError = res?.screenshot_error || tc.screenshot_error;
 
                           return (
                             <div
@@ -974,16 +976,46 @@ export function TestRunPage() {
                               )}
 
                               {/* Screenshot Thumbnail */}
-                              {screenshotPath && (
+                              {(screenshotPath || failureScreenshotPath || screenshotError) && (
                                 <div style={{ marginTop: '14px' }}>
                                   <div style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', marginBottom: '6px' }}>
                                     Screenshot Evidence:
                                   </div>
-                                  <ScreenshotViewer
-                                    runId={runId}
-                                    filename={screenshotPath.split(/[\\/]/).pop()}
-                                    caption={`Evidence ${tc.test_key || tc.title}`}
-                                  />
+                                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                                    {failureScreenshotPath && (
+                                      <div>
+                                        <div style={{ fontSize: '11px', color: '#DC2626', fontWeight: 600, marginBottom: '4px' }}>
+                                          Failure Moment:
+                                        </div>
+                                        <ScreenshotViewer
+                                          runId={runId}
+                                          filename={failureScreenshotPath.split(/[\\/]/).pop()}
+                                          caption={`Failure Moment ${tc.test_key || tc.title}`}
+                                          reason={screenshotError}
+                                        />
+                                      </div>
+                                    )}
+                                    {screenshotPath && (
+                                      <div>
+                                        <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, marginBottom: '4px' }}>
+                                          Final State:
+                                        </div>
+                                        <ScreenshotViewer
+                                          runId={runId}
+                                          filename={screenshotPath.split(/[\\/]/).pop()}
+                                          caption={`Evidence ${tc.test_key || tc.title}`}
+                                          reason={screenshotError}
+                                        />
+                                      </div>
+                                    )}
+                                    {!failureScreenshotPath && !screenshotPath && (
+                                      <ScreenshotViewer
+                                        runId={runId}
+                                        filename={null}
+                                        reason={screenshotError}
+                                      />
+                                    )}
+                                  </div>
                                 </div>
                               )}
                             </div>
