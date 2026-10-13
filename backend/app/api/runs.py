@@ -4,8 +4,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,7 +20,6 @@ from app.services.run_service import (
     ACTIVE_STATUSES,
     acquire_run_lock,
     check_and_fail_dead_run,
-    get_cached_run_status,
     get_live_progress,
     get_live_step_events,
     release_run_lock,
@@ -164,9 +163,12 @@ class RunDetailResponse(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID
     status: str
+    stage: str = "QUEUED"
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
+    server_time: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: Optional[str] = None
     failed_stage: Optional[str] = None
     cancel_requested: bool
@@ -178,9 +180,12 @@ class RunDetailResponse(BaseModel):
     agent_stage: Optional[str] = None
     current_stage: Optional[str] = None
     current_test: Optional[str] = None
+    current_test_key: Optional[str] = None
     current_step: Optional[int] = None
     total_tests: Optional[int] = 0
     completed_tests: Optional[int] = 0
+    tests_done: Optional[int] = 0
+    tests_total: Optional[int] = 0
     passed_tests: Optional[int] = 0
     failed_tests: Optional[int] = 0
     blocked_tests: Optional[int] = 0
@@ -241,10 +246,13 @@ async def create_test_run(
         )
 
     # Create new run in QUEUED
+    now = datetime.now(timezone.utc)
     new_run = TestRun(
         project_id=project_id,
         status="QUEUED",
-        created_at=datetime.now(timezone.utc),
+        stage="QUEUED",
+        created_at=now,
+        updated_at=now,
     )
     db.add(new_run)
     await db.commit()
@@ -271,6 +279,7 @@ async def create_test_run(
 @router.get("/runs/{run_id}", response_model=RunDetailResponse)
 async def get_test_run(
     run_id: uuid.UUID,
+    response: Response,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -292,8 +301,7 @@ async def get_test_run(
     if run.status in ACTIVE_STATUSES:
         await check_and_fail_dead_run(run, db)
 
-    # Check if there is an active stage / progress in Redis cache
-    cached = await get_cached_run_status(run_id)
+    # Live progress from Redis
     progress = await get_live_progress(run_id) or {}
     recent_events = await get_live_step_events(run_id)
 
@@ -305,6 +313,7 @@ async def get_test_run(
     all_results = []
     tc_responses = []
 
+    min_order = min((tc.order_index for tc in run.test_cases), default=0)
     for tc in run.test_cases:
         res = tc.results[0] if tc.results else None
         details = extract_execution_details(res)
@@ -348,7 +357,10 @@ async def get_test_run(
             if run.status in ("COMPLETED", "FAILED", "CANCELLED"):
                 not_run_tests += 1
 
-        test_key = getattr(tc, "test_key", None) or f"TC-{tc.order_index + 1}"
+        test_key = getattr(tc, "test_key", None)
+        if not test_key:
+            test_key = f"TC-{tc.order_index}" if min_order == 1 else f"TC-{tc.order_index + 1}"
+
         tc_responses.append(
             TestCaseResponse(
                 id=tc.id,
@@ -375,37 +387,43 @@ async def get_test_run(
     # Honest progress: count only tests that actually finished
     completed_tests = passed_tests + failed_tests + blocked_tests
 
-    failed_stage = run.failed_stage or (cached.get("failed_stage") if cached else None)
-
-    if run.status == "FAILED":
-        current_stage = (
-            failed_stage
-            or (cached.get("stage") if cached else None)
-            or progress.get("stage")
-            or "QUEUED"
-        )
-    elif run.status == "COMPLETED":
+    failed_stage = run.failed_stage
+    current_stage = (
+        run.stage
+        or (run.failed_stage if run.status == "FAILED" else None)
+        or run.status
+    )
+    if run.status == "COMPLETED":
         current_stage = "COMPLETED"
-    elif run.status in ACTIVE_STATUSES:
-        current_stage = (
-            progress.get("stage") or (cached.get("stage") if cached else None) or run.status
-        )
-    else:
-        current_stage = (
-            (cached.get("stage") if cached else None) or progress.get("stage") or "QUEUED"
-        )
 
-    effective_status = run.status
-    if cached and run.status in ACTIVE_STATUSES:
-        effective_status = cached.get("status", run.status)
+    # Set no-store cache headers
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+
+    now = datetime.now(timezone.utc)
+    updated_at = run.updated_at or run.created_at or now
+
+    tests_done = (
+        progress.get("completed_tests")
+        if progress.get("completed_tests") is not None
+        else completed_tests
+    )
+    tests_total = (
+        progress.get("total_tests")
+        if progress.get("total_tests") is not None
+        else total_tests
+    )
 
     return RunDetailResponse(
         id=run.id,
         project_id=run.project_id,
-        status=effective_status,
+        status=run.status,
+        stage=current_stage,
         created_at=run.created_at,
         started_at=run.started_at,
         completed_at=run.completed_at,
+        updated_at=updated_at,
+        server_time=now,
         error_message=run.error_message,
         failed_stage=failed_stage,
         cancel_requested=run.cancel_requested,
@@ -415,9 +433,12 @@ async def get_test_run(
         agent_stage=current_stage,
         current_stage=current_stage,
         current_test=progress.get("current_test"),
+        current_test_key=progress.get("current_test_key") or progress.get("current_test"),
         current_step=progress.get("current_step"),
         total_tests=total_tests,
         completed_tests=completed_tests,
+        tests_done=tests_done,
+        tests_total=tests_total,
         passed_tests=passed_tests,
         failed_tests=failed_tests,
         blocked_tests=blocked_tests,

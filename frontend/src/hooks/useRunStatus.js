@@ -12,22 +12,41 @@ export function useRunStatus(runId, options = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  const [lastUpdateSeconds, setLastUpdateSeconds] = useState(0);
 
   const timerRef = useRef(null);
   const isMountedRef = useRef(true);
+  const requestSeqRef = useRef(0);
+  const latestTimestampRef = useRef(0);
 
   const fetchRun = useCallback(async () => {
-    if (!runId) return;
+    if (!runId) return null;
+    const currentSeq = ++requestSeqRef.current;
     try {
       const data = await api.runs.get(runId);
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current) return null;
+
+      // Stale-response ordering: ignore out-of-order responses
+      if (currentSeq < requestSeqRef.current) {
+        return null;
+      }
+
+      if (data?.updated_at) {
+        const updateTs = new Date(data.updated_at).getTime();
+        if (updateTs < latestTimestampRef.current) {
+          // Ignore response with an older updated_at than what we already applied
+          return null;
+        }
+        latestTimestampRef.current = updateTs;
+      }
+
       setRun(data);
       if (data.test_cases) setTestCases(data.test_cases);
       if (data.results) setResults(data.results);
       setError(null);
       return data;
     } catch (err) {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current) return null;
       setError(err.message || 'Failed to fetch test run details');
       return null;
     } finally {
@@ -52,6 +71,7 @@ export function useRunStatus(runId, options = {}) {
     }
   }, [runId, fetchRun]);
 
+  // Polling loop
   useEffect(() => {
     isMountedRef.current = true;
     if (!runId || !enabled) {
@@ -84,6 +104,36 @@ export function useRunStatus(runId, options = {}) {
     };
   }, [runId, pollInterval, enabled, fetchRun]);
 
+  // Counter for seconds since last update / change
+  const lastChangeTimeRef = useRef(0);
+  const prevSignatureRef = useRef('');
+
+  useEffect(() => {
+    if (!lastChangeTimeRef.current) {
+      lastChangeTimeRef.current = Date.now();
+    }
+    if (!run) return;
+    const sig = `${run.updated_at || ''}-${run.stage || ''}-${run.status || ''}-${run.current_step || ''}-${run.completed_tests || ''}-${run.tests_done || ''}`;
+    if (prevSignatureRef.current !== sig) {
+      prevSignatureRef.current = sig;
+      lastChangeTimeRef.current = Date.now();
+      setLastUpdateSeconds(0);
+    }
+  }, [run]);
+
+  useEffect(() => {
+    const calcSecs = () => {
+      const secs = Math.max(0, Math.floor((Date.now() - lastChangeTimeRef.current) / 1000));
+      setLastUpdateSeconds(secs);
+    };
+
+    const interval = setInterval(calcSecs, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const isTerminal = run ? TERMINAL_STATES.includes(run.status) : false;
+  const isStalled = !isTerminal && lastUpdateSeconds >= 60;
+
   return {
     run,
     testCases,
@@ -93,6 +143,8 @@ export function useRunStatus(runId, options = {}) {
     cancelling,
     cancelRun,
     refetch: fetchRun,
-    isTerminal: run ? TERMINAL_STATES.includes(run.status) : false,
+    isTerminal,
+    lastUpdateSeconds,
+    isStalled,
   };
 }

@@ -6,11 +6,10 @@ from datetime import datetime, timezone
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
 
 from app.core.database import get_async_session_factory
 from app.models.test_run import TestRun
-from app.services.run_service import cache_run_status, update_live_progress
+from app.services.run_service import update_run_stage_and_status
 
 
 @pytest.mark.asyncio
@@ -38,43 +37,28 @@ async def test_live_status_stages_appear_in_order(client: AsyncClient, auth_head
     pipeline_finished = asyncio.Event()
 
     async def _mock_pipeline():
-        session_factory = get_async_session_factory()
+        try:
+            for stg in ["PREFLIGHT", "PLANNING", "EXECUTING", "ANALYZING", "REPORTING"]:
+                await asyncio.sleep(0.15)
+                await update_run_stage_and_status(run_id, stage=stg, status=stg)
 
-        for stg in ["PREFLIGHT", "PLANNING", "EXECUTING", "ANALYZING", "REPORTING"]:
+            # Completed
             await asyncio.sleep(0.15)
-            async with session_factory() as s:
-                await s.execute(
-                    update(TestRun)
-                    .where(TestRun.id == run_id)
-                    .values(status=stg)
-                )
-                await s.commit()
-            await cache_run_status(run_id, status=stg, stage=stg)
-            await update_live_progress(run_id, stage=stg)
-
-        # Completed
-        await asyncio.sleep(0.15)
-        now = datetime.now(timezone.utc)
-        async with session_factory() as s:
-            await s.execute(
-                update(TestRun)
-                .where(TestRun.id == run_id)
-                .values(status="COMPLETED", completed_at=now)
+            now = datetime.now(timezone.utc)
+            await update_run_stage_and_status(
+                run_id, stage="COMPLETED", status="COMPLETED", completed_at=now
             )
-            await s.commit()
-        await cache_run_status(run_id, status="COMPLETED", stage="COMPLETED")
-        await update_live_progress(run_id, stage="COMPLETED")
-        pipeline_finished.set()
+        finally:
+            pipeline_finished.set()
 
     pipeline_task = asyncio.create_task(_mock_pipeline())
 
     # Poll until pipeline completes and COMPLETED is observed
-    while True:
+    for _ in range(80):
         resp = await client.get(f"/runs/{run_id}", headers=headers)
         assert resp.status_code == 200
         data = resp.json()
 
-        # The stage could come from stage or current_stage or agent_stage
         current_st = (
             data.get("stage")
             or data.get("current_stage")
@@ -91,6 +75,8 @@ async def test_live_status_stages_appear_in_order(client: AsyncClient, auth_head
         if pipeline_finished.is_set() and current_st == "COMPLETED":
             break
         await asyncio.sleep(0.05)
+    else:
+        pytest.fail(f"Timed out polling pipeline. Observed stages: {observed_stages}")
 
     await pipeline_task
 
@@ -105,3 +91,77 @@ async def test_live_status_stages_appear_in_order(client: AsyncClient, auth_head
     assert indices == sorted(indices), (
         f"Stages did not appear in chronological order: {observed_stages}"
     )
+
+
+@pytest.mark.asyncio
+async def test_stage_change_always_updates_db_and_redis(client: AsyncClient, auth_headers):
+    """Calling update_run_stage_and_status must update both PostgreSQL test_runs row and Redis."""
+    from sqlalchemy import select
+
+    from app.services.run_service import (
+        get_cached_run_status,
+        get_live_progress,
+        update_run_stage_and_status,
+    )
+
+    headers, user_id, proj_id = auth_headers
+
+    create_resp = await client.post(f"/projects/{proj_id}/runs", headers=headers)
+    assert create_resp.status_code == 201
+    run_id = uuid.UUID(create_resp.json()["id"])
+
+    # Update to PLANNING
+    await update_run_stage_and_status(
+        run_id=run_id,
+        stage="PLANNING",
+        status="PLANNING",
+        tests_total=5,
+        tests_done=1,
+        current_test_key="TC-1",
+    )
+
+    # 1. Verify Database
+    session_factory = get_async_session_factory()
+    async with session_factory() as s:
+        db_run = (
+            await s.execute(select(TestRun).where(TestRun.id == run_id))
+        ).scalar_one()
+        assert db_run.status == "PLANNING"
+        assert db_run.stage == "PLANNING"
+        assert db_run.updated_at is not None
+
+    # 2. Verify Redis status cache
+    cached = await get_cached_run_status(run_id)
+    assert cached is not None
+    assert cached.get("status") == "PLANNING"
+    assert cached.get("stage") == "PLANNING"
+
+    # 3. Verify Redis live progress
+    progress = await get_live_progress(run_id)
+    assert progress is not None
+    assert progress.get("stage") == "PLANNING"
+    assert progress.get("total_tests") == 5
+    assert progress.get("completed_tests") == 1
+
+
+@pytest.mark.asyncio
+async def test_get_run_endpoint_returns_no_store_and_server_fields(
+    client: AsyncClient, auth_headers
+):
+    """GET /runs/{id} returns Cache-Control: no-store and authoritative server_time/updated_at."""
+    headers, user_id, proj_id = auth_headers
+
+    create_resp = await client.post(f"/projects/{proj_id}/runs", headers=headers)
+    assert create_resp.status_code == 201
+    run_id = create_resp.json()["id"]
+
+    resp = await client.get(f"/runs/{run_id}", headers=headers)
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("Cache-Control", "")
+    data = resp.json()
+    assert "stage" in data
+    assert "server_time" in data
+    assert "updated_at" in data
+    assert "tests_done" in data
+    assert "tests_total" in data
+

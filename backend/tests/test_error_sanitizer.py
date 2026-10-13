@@ -67,6 +67,9 @@ async def test_real_deadline_exceeded_reported_correctly():
 
     with (
         patch("app.agent.graph.get_settings") as mock_settings,
+        patch(
+            "app.agent.graph.update_run_stage_and_status", new_callable=AsyncMock
+        ) as mock_update_status,
         patch("app.agent.graph.update_run_in_db", new_callable=AsyncMock) as mock_update_db,
         patch("app.agent.graph.cache_run_status", new_callable=AsyncMock),
         patch("app.agent.graph.update_live_progress", new_callable=AsyncMock),
@@ -86,8 +89,9 @@ async def test_real_deadline_exceeded_reported_correctly():
 
         await execute_agent_run(run_id=run_id, project_id=project_id)
 
-        assert mock_update_db.called
-        final_call = mock_update_db.call_args_list[-1]
+        calls = mock_update_status.call_args_list or mock_update_db.call_args_list
+        assert calls, "Expected status/stage update to be called"
+        final_call = calls[-1]
         err_msg = final_call.kwargs.get("error_message", "")
         assert "Run exceeded the time limit of 0.05 seconds" in err_msg
 

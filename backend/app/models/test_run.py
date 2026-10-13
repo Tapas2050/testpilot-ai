@@ -28,7 +28,13 @@ class TestRun(Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(String(32), default="QUEUED", nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(String(32), default="QUEUED", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,

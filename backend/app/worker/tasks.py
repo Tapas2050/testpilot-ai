@@ -19,9 +19,13 @@ logger = logging.getLogger(__name__)
 
 def parse_redis_settings(url: str) -> RedisSettings:
     """Parse a Redis URL into arq RedisSettings."""
-    parsed = urlparse(url)
+    norm_url = url.replace("://localhost:", "://127.0.0.1:").replace("@localhost:", "@127.0.0.1:")
+    parsed = urlparse(norm_url)
+    host = parsed.hostname or "127.0.0.1"
+    if host == "localhost":
+        host = "127.0.0.1"
     return RedisSettings(
-        host=parsed.hostname or "localhost",
+        host=host,
         port=parsed.port or 6379,
         password=parsed.password,
         database=int(parsed.path.lstrip("/") or 0),

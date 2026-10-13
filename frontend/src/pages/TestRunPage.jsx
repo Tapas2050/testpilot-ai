@@ -67,6 +67,8 @@ export function TestRunPage() {
     cancelling,
     cancelRun,
     isTerminal: hookIsTerminal,
+    lastUpdateSeconds,
+    isStalled,
   } = useRunStatus(runId);
 
   const isTerminal = hookIsTerminal || (run?.status ? ['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status) : false);
@@ -84,8 +86,13 @@ export function TestRunPage() {
     }
     const startTime = new Date(run.started_at).getTime();
 
+    // Calculate client vs server time offset to align timer with server
+    const serverTimeMs = run.server_time ? new Date(run.server_time).getTime() : Date.now();
+    const clientOffset = Date.now() - serverTimeMs;
+
     const updateElapsed = () => {
-      const endTime = run.completed_at ? new Date(run.completed_at).getTime() : Date.now();
+      const nowServerMs = Date.now() - clientOffset;
+      const endTime = run.completed_at ? new Date(run.completed_at).getTime() : nowServerMs;
       const secs = Math.max(0, Math.floor((endTime - startTime) / 1000));
       setElapsedSeconds(secs);
     };
@@ -95,7 +102,7 @@ export function TestRunPage() {
 
     const interval = setInterval(updateElapsed, 1000);
     return () => clearInterval(interval);
-  }, [run?.started_at, run?.completed_at, isTerminal]);
+  }, [run?.started_at, run?.completed_at, run?.server_time, isTerminal]);
 
   // Auto-scroll feed on new events
   const recentEvents = useMemo(() => run?.recent_events || [], [run?.recent_events]);
@@ -173,11 +180,13 @@ export function TestRunPage() {
   const completedTests = run?.completed_tests ?? (passCount + failCount + blockedCount);
   const progressPercent = totalTests > 0 ? Math.min(100, Math.round((completedTests / totalTests) * 100)) : 0;
 
-  const currentStage =
+  const currentStage = (
     run?.failed_stage ||
+    run?.stage ||
     run?.current_stage ||
     run?.agent_stage ||
-    (run?.status === 'COMPLETED' ? 'COMPLETED' : 'QUEUED');
+    (run?.status === 'COMPLETED' ? 'COMPLETED' : 'QUEUED')
+  ).toUpperCase();
   const statusStyle = getStatusStyle(run?.status);
 
   // Friendly state message when in early stages
@@ -263,6 +272,11 @@ export function TestRunPage() {
               Stage: <strong>{currentStage}</strong>
               {totalTests > 0 && ` • Progress: ${completedTests}/${totalTests} tests`}
               {run?.started_at && ` • Elapsed: ${formatDuration(elapsedSeconds)}`}
+              {typeof lastUpdateSeconds === 'number' && (
+                <span style={{ fontSize: '12px', color: '#94A3B8', marginLeft: '8px' }}>
+                  (Last update {lastUpdateSeconds}s ago)
+                </span>
+              )}
             </p>
           </div>
 
@@ -312,6 +326,15 @@ export function TestRunPage() {
         </div>
 
         {/* Banners */}
+        {!isTerminal && isStalled && (
+          <div style={{ marginBottom: '24px' }}>
+            <Banner
+              type="info"
+              title="Waiting for progress"
+              message="Waiting for the worker to report progress"
+            />
+          </div>
+        )}
         {run?.status === 'FAILED' && (
           <div style={{ marginBottom: '24px' }}>
             <Banner

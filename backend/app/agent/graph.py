@@ -26,13 +26,14 @@ from app.core.security import (
 from app.models.project import Project
 from app.models.test_run import Failure, TestCase, TestResult, TestRun
 from app.services.run_service import (
-    cache_run_status,
+    cache_run_status,  # noqa: F401
     clear_live_progress_keys,
     is_cancel_flag_set,
     release_run_lock,
     set_worker_heartbeat,
     update_live_progress,
     update_run_in_db,
+    update_run_stage_and_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,9 +61,9 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
 
     stage = "PLANNING"
     logger.info("[run_id=%s] Stage changed to PLANNING", run_id)
-    await update_run_in_db(run_id, status=stage, db_url=db_url)
-    await cache_run_status(run_id, status=stage, stage=stage)
-    await update_live_progress(run_id, stage=stage, total_tests=0, completed_tests=0)
+    await update_run_stage_and_status(
+        run_id, stage=stage, status=stage, db_url=db_url, tests_total=0, tests_done=0
+    )
 
     # Retrieve project documents and generate test plan via Planner Agent
     session_factory = get_async_session_factory(db_url)
@@ -132,7 +133,7 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
         plan = await generate_test_plan(requirements_text=requirements_text, project_url=target_url)
 
         db_test_cases = []
-        for idx, tc in enumerate(plan.test_cases, start=1):
+        for idx, tc in enumerate(plan.test_cases, start=0):
             db_tc = TestCase(
                 run_id=run_id,
                 title=tc.title,
@@ -150,8 +151,13 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
         for db_tc in db_test_cases:
             await session.refresh(db_tc)
 
-        await update_live_progress(
-            run_id, stage="PLANNING", total_tests=len(db_test_cases), completed_tests=0
+        await update_run_stage_and_status(
+            run_id,
+            stage="PLANNING",
+            status="PLANNING",
+            db_url=db_url,
+            tests_total=len(db_test_cases),
+            tests_done=0,
         )
 
         test_cases = [
@@ -182,8 +188,7 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
 
     stage = "EXECUTING"
     logger.info("[run_id=%s] Stage changed to EXECUTING", run_id)
-    await update_run_in_db(run_id, status=stage, db_url=db_url)
-    await cache_run_status(run_id, status=stage, stage=stage)
+    await update_run_stage_and_status(run_id, stage=stage, status=stage, db_url=db_url)
 
     from app.core.security import decrypt_credential
     from app.models.credential import ProjectCredential
@@ -264,7 +269,10 @@ async def execute_node(state: AgentState) -> dict[str, Any]:
                 if await check_cancellation(state):
                     return {"cancel_requested": True, "current_stage": "CANCELLED"}
 
-                tc_key = getattr(tc, "test_key", None) or f"tc_{tc.order_index + 1}"
+                min_order = min((t.order_index for t in tcs), default=0)
+                tc_key = getattr(tc, "test_key", None) or (
+                    f"TC-{tc.order_index}" if min_order == 1 else f"TC-{tc.order_index + 1}"
+                )
                 _active_test_keys[run_id] = tc_key
                 tc.status = "RUNNING"
                 session.add(tc)
@@ -557,9 +565,7 @@ async def analyze_node(state: AgentState) -> dict[str, Any]:
 
     stage = "ANALYZING"
     logger.info("[run_id=%s] Stage changed to ANALYZING", run_id)
-    await update_run_in_db(run_id, status=stage, db_url=db_url)
-    await cache_run_status(run_id, status=stage, stage=stage)
-    await update_live_progress(run_id, stage=stage)
+    await update_run_stage_and_status(run_id, stage=stage, status=stage, db_url=db_url)
 
     from sqlalchemy import select
 
@@ -679,9 +685,7 @@ async def report_node(state: AgentState) -> dict[str, Any]:
 
     stage = "REPORTING"
     logger.info("[run_id=%s] Stage changed to REPORTING", run_id)
-    await update_run_in_db(run_id, status=stage, db_url=db_url)
-    await cache_run_status(run_id, status=stage, stage=stage)
-    await update_live_progress(run_id, stage=stage)
+    await update_run_stage_and_status(run_id, stage=stage, status=stage, db_url=db_url)
 
     from sqlalchemy import select
 
@@ -692,6 +696,7 @@ async def report_node(state: AgentState) -> dict[str, Any]:
     async with session_factory() as session:
         tc_stmt = select(TestCase).where(TestCase.run_id == run_id).order_by(TestCase.order_index)
         tcs = (await session.execute(tc_stmt)).scalars().all()
+        min_order = min((tc.order_index for tc in tcs), default=0)
         tcs_data = [
             {
                 "id": str(tc.id),
@@ -701,7 +706,8 @@ async def report_node(state: AgentState) -> dict[str, Any]:
                 "source_requirement": tc.source_requirement,
                 "target_role": tc.target_role,
                 "order_index": tc.order_index,
-                "test_key": getattr(tc, "test_key", None) or f"TC-{tc.order_index + 1}",
+                "test_key": getattr(tc, "test_key", None)
+                or (f"TC-{tc.order_index}" if min_order == 1 else f"TC-{tc.order_index + 1}"),
                 "checks": getattr(tc, "checks", None) or [],
             }
             for tc in tcs
@@ -762,15 +768,15 @@ async def complete_node(state: AgentState) -> dict[str, Any]:
             "Authentication or LLM provider failure for all executed tests."
         )
         logger.info("[run_id=%s] Stage changed to %s (error=%s)", run_id, status, err_msg)
-        await update_run_in_db(
+        await update_run_stage_and_status(
             run_id,
+            stage=status,
             status=status,
+            failed_stage="EXECUTING",
             completed_at=now,
             error_message=err_msg,
             db_url=db_url,
         )
-        await cache_run_status(run_id, status=status, stage=status, error=err_msg)
-        await update_live_progress(run_id, stage=status)
         await release_run_lock(project_id)
         return {
             "current_stage": status,
@@ -780,9 +786,13 @@ async def complete_node(state: AgentState) -> dict[str, Any]:
 
     status = "COMPLETED"
     logger.info("[run_id=%s] Stage changed to %s", run_id, status)
-    await update_run_in_db(run_id, status=status, completed_at=now, db_url=db_url)
-    await cache_run_status(run_id, status=status, stage=status)
-    await update_live_progress(run_id, stage=status)
+    await update_run_stage_and_status(
+        run_id,
+        stage=status,
+        status=status,
+        completed_at=now,
+        db_url=db_url,
+    )
     await release_run_lock(project_id)
 
     return {
@@ -798,12 +808,14 @@ async def cancel_node(state: AgentState) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     status = "CANCELLED"
     logger.info("[run_id=%s] Stage changed to %s", run_id, status)
-
-    await update_run_in_db(
-        run_id, status=status, completed_at=now, cancel_requested=True, db_url=db_url
+    await update_run_stage_and_status(
+        run_id,
+        stage=status,
+        status=status,
+        completed_at=now,
+        cancel_requested=True,
+        db_url=db_url,
     )
-    await cache_run_status(run_id, status=status, stage=status)
-    await update_live_progress(run_id, stage=status)
 
     project_id = uuid.UUID(state["project_id"])
     await release_run_lock(project_id)
@@ -958,14 +970,18 @@ async def _finalize_run(
                 session.add(run)
                 await session.commit()
 
-                # Update Redis status cache (never overwrite stage with FAILED)
+                # Update DB and Redis via authoritative helper
                 cache_stage = run.failed_stage or run.status
-                await cache_run_status(
+                await update_run_stage_and_status(
                     run_id,
-                    status=run.status,
                     stage=cache_stage,
-                    error=run.error_message,
+                    status=run.status,
                     failed_stage=run.failed_stage,
+                    error_message=run.error_message,
+                    completed_at=run.completed_at,
+                    cancel_requested=run.cancel_requested,
+                    report=run.report,
+                    db_url=db_url,
                 )
             elif exit_status:
                 if user_cancelled or exit_status == "CANCELLED":
@@ -977,17 +993,22 @@ async def _finalize_run(
                 await update_run_in_db(
                     run_id,
                     status=final_status,
+                    stage=(failed_stage if final_status == "FAILED" else final_status),
                     error_message=final_err,
                     failed_stage=failed_stage if final_status == "FAILED" else None,
                     completed_at=now,
                     cancel_requested=(final_status == "CANCELLED"),
                     db_url=db_url,
                 )
-                await cache_run_status(
+                await update_run_stage_and_status(
                     run_id,
+                    stage=(failed_stage if final_status == "FAILED" else final_status),
                     status=final_status,
-                    stage=final_status,
-                    error=final_err,
+                    error_message=final_err,
+                    failed_stage=failed_stage if final_status == "FAILED" else None,
+                    completed_at=now,
+                    cancel_requested=(final_status == "CANCELLED"),
+                    db_url=db_url,
                 )
     except Exception as e:
         logger.error("[run_id=%s] Error updating DB in finalizer: %s", run_id, e)
@@ -1064,10 +1085,11 @@ async def execute_agent_run(
             raise RuntimeError("Forced node exception during execution")
 
         # Fast preflight checks before planning stage
-        active_stage = "preflight"
-        logger.info("[run_id=%s] Stage changed to preflight", run_id)
-        await update_run_in_db(run_id, status="preflight", db_url=db_url)
-        await cache_run_status(run_id, status="preflight", stage="preflight")
+        active_stage = "PREFLIGHT"
+        logger.info("[run_id=%s] Stage changed to PREFLIGHT", run_id)
+        await update_run_stage_and_status(
+            run_id, stage="PREFLIGHT", status="PREFLIGHT", db_url=db_url
+        )
 
         try:
             injected_mcp = _active_mcp_clients.get(run_id)

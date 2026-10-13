@@ -42,7 +42,14 @@ _session_factories: dict[str, async_sessionmaker[AsyncSession]] = {}
 
 def get_async_session_factory(db_url: Optional[str] = None) -> async_sessionmaker[AsyncSession]:
     """Get or create an async sessionmaker for the given database URL."""
-    target_url = str(db_url or settings.DATABASE_URL)
+    import os
+
+    is_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    test_db = getattr(settings, "TEST_DATABASE_URL", None)
+    if not db_url and is_test and test_db:
+        target_url = str(test_db)
+    else:
+        target_url = str(db_url or settings.DATABASE_URL)
     if target_url not in _session_factories:
         eng = create_async_engine(target_url, poolclass=NullPool, echo=False)
         _session_factories[target_url] = async_sessionmaker(

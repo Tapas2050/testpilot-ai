@@ -18,7 +18,7 @@ from app.models.test_run import TestCase, TestResult, TestRun
 
 logger = logging.getLogger(__name__)
 
-ACTIVE_STATUSES = {"QUEUED", "PLANNING", "EXECUTING", "ANALYZING", "REPORTING"}
+ACTIVE_STATUSES = {"QUEUED", "PREFLIGHT", "PLANNING", "EXECUTING", "ANALYZING", "REPORTING"}
 
 
 def get_lock_ttl_seconds() -> int:
@@ -112,6 +112,7 @@ async def get_cached_run_status(run_id: uuid.UUID) -> Optional[dict[str, Any]]:
 async def update_run_in_db(
     run_id: uuid.UUID,
     status: Optional[str] = None,
+    stage: Optional[str] = None,
     started_at: Optional[datetime] = None,
     completed_at: Optional[datetime] = None,
     error_message: Optional[str] = None,
@@ -122,9 +123,11 @@ async def update_run_in_db(
     db_url: Optional[str] = None,
 ) -> None:
     """Update fields of a TestRun record in PostgreSQL."""
-    values: dict[str, Any] = {}
+    values: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
     if status is not None:
         values["status"] = status
+    if stage is not None:
+        values["stage"] = stage
     if started_at is not None:
         values["started_at"] = started_at
     if completed_at is not None:
@@ -138,8 +141,61 @@ async def update_run_in_db(
     if cancel_requested is not None:
         values["cancel_requested"] = cancel_requested
 
-    if not values:
-        return
+    if session is not None:
+        await session.execute(update(TestRun).where(TestRun.id == run_id).values(**values))
+        await session.commit()
+    else:
+        from app.core.database import get_async_session_factory
+
+        factory = get_async_session_factory(db_url)
+        async with factory() as s:
+            await s.execute(update(TestRun).where(TestRun.id == run_id).values(**values))
+            await s.commit()
+
+
+async def update_run_stage_and_status(
+    run_id: uuid.UUID,
+    stage: str,
+    status: Optional[str] = None,
+    session: Optional[AsyncSession] = None,
+    db_url: Optional[str] = None,
+    error_message: Optional[str] = None,
+    failed_stage: Optional[str] = None,
+    started_at: Optional[datetime] = None,
+    completed_at: Optional[datetime] = None,
+    report: Optional[dict[str, Any]] = None,
+    cancel_requested: Optional[bool] = None,
+    current_test_key: Optional[str] = None,
+    current_step: Optional[int] = None,
+    tests_done: Optional[int] = None,
+    tests_total: Optional[int] = None,
+) -> datetime:
+    """Authoritative helper for all stage and status transitions.
+
+    Writes to database first, commits, then updates Redis run_status and run_progress.
+    """
+    normalized_stage = stage.upper()
+    eff_status = status.upper() if status else normalized_stage
+    now = datetime.now(timezone.utc)
+
+    # 1. Update database record first
+    values: dict[str, Any] = {
+        "stage": normalized_stage,
+        "status": eff_status,
+        "updated_at": now,
+    }
+    if error_message is not None:
+        values["error_message"] = error_message
+    if failed_stage is not None:
+        values["failed_stage"] = failed_stage.upper()
+    if started_at is not None:
+        values["started_at"] = started_at
+    if completed_at is not None:
+        values["completed_at"] = completed_at
+    if report is not None:
+        values["report"] = report
+    if cancel_requested is not None:
+        values["cancel_requested"] = cancel_requested
 
     if session is not None:
         await session.execute(update(TestRun).where(TestRun.id == run_id).values(**values))
@@ -151,6 +207,27 @@ async def update_run_in_db(
         async with factory() as s:
             await s.execute(update(TestRun).where(TestRun.id == run_id).values(**values))
             await s.commit()
+
+    # 2. Update Redis status cache
+    await cache_run_status(
+        run_id=run_id,
+        status=eff_status,
+        stage=normalized_stage,
+        error=error_message,
+        failed_stage=failed_stage.upper() if failed_stage else None,
+    )
+
+    # 3. Update Redis live progress
+    await update_live_progress(
+        run_id=run_id,
+        stage=normalized_stage,
+        current_test=current_test_key,
+        current_step=current_step,
+        total_tests=tests_total,
+        completed_tests=tests_done,
+    )
+
+    return now
 
 
 async def append_live_step_event(
