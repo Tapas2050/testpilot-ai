@@ -31,4 +31,7 @@ storage/
 .vscode/
 *.swp
 *.swo
-
+
+# Personal documentation and developer guides
+docs/
+UNDERSTANDING_TESTPILOT.md

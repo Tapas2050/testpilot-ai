@@ -280,8 +280,6 @@ testpilot/
 │   ├── reseed.py                  # Database reset script (5 seed tickets)
 │   ├── SUPPORTDESK_REQUIREMENTS.md# Specification document for RAG indexing
 │   └── tests/                     # SupportDesk functionality & defect tests
-├── docs/                          # Architecture, PRD, TASKS, DECISIONS, MEMORY
-├── UNDERSTANDING_TESTPILOT.md     # Plain-English architecture walkthrough
 └── README.md                      # Production showcase documentation
 ```
 
