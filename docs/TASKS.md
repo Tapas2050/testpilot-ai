@@ -172,4 +172,21 @@ Update after every task. Only one phase is in progress at a time. Details for ea
 - [x] Part 6: Create read-only run review evaluation tool backend/scripts/review_run.py with --expect-supportdesk-defects flag and fixture row tests (D-044)
 - [x] Part 7: Housekeeping (update MEMORY.md, DECISIONS.md, TASKS.md, TEST_PLAN.md, keep Docker out of all instructions)
 
+## Phase 14: Showcase README, CI/CD Pipeline Matrix, and Public Repository Release
+- [x] 14.1 Grounded showcase README redesign using readme-creator (ASCII state machine workflows, technology matrix, verified benchmark)
+- [x] 14.2 Plain-English architecture and developer onboarding guide (UNDERSTANDING_TESTPILOT.md)
+- [x] 14.3 GitHub Actions Backend CI workflow with PostgreSQL 16 + pgvector and Redis 7 service containers
+- [x] 14.4 GitHub Actions Frontend CI workflow with Node 20, Vitest, and Oxlint
+- [x] 14.5 GitHub Actions SupportDesk Target CRM CI workflow
+- [x] 14.6 Unified multi-job CI workflow with concurrency controls (ci.yml)
+- [x] 14.7 CI test environment configuration and mock secret profile (.github/ci-test.env)
+- [x] 14.8 Cross-platform automated test runner scripts (scripts/run_all_tests.ps1, scripts/run_all_tests.sh)
+- [x] 14.9 Markdown export format and CLI options for run review evaluation tool (backend/scripts/review_run.py)
+- [x] 14.10 Dockerfile and Docker Compose configurations for containerized stack and demo target
+- [x] 14.11 GitHub community health templates (bug report, feature request, pull request template)
+- [x] 14.12 Repository governance documents (MIT License, CONTRIBUTING.md, SECURITY.md)
+- [x] 14.13 Record Architecture Decisions D-045 and D-046 in DECISIONS.md
+- [x] 14.14 Create unique GitHub repository Tapas2050/testpilot-ai and publish complete commit history
+
+
 
