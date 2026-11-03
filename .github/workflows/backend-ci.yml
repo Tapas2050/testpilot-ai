@@ -48,8 +48,8 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       TEST_REDIS_URL: redis://localhost:6379/1
       JWT_SECRET: ci-jwt-secret-testing-minimum-32-characters-required
-      ENCRYPTION_KEY: dXNlci1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcy1iYXNlNjQ=
-      GEMINI_API_KEY: dummy-ci-gemini-key
+      CREDENTIAL_ENCRYPTION_KEY: -yIy4oehuP29PY2C7QMb8WzxJYlg2kkDoZvFy7gGXpY=
+      GOOGLE_API_KEY: dummy-ci-google-api-key
       ROOT_DIR: ${{ github.workspace }}
       STORAGE_DIR: ${{ github.workspace }}/storage
 
