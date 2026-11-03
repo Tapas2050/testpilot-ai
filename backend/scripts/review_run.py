@@ -229,10 +229,73 @@ def format_review_text(data: dict[str, Any], expect_defects: bool = False) -> st
     return "\n".join(lines)
 
 
+def format_review_markdown(data: dict[str, Any], expect_defects: bool = False) -> str:
+    """Format review data as GitHub Flavored Markdown."""
+    lines = []
+    lines.append(f"# TestPilot Run Review — `{data['run_id']}`\n")
+    lines.append("| Metric | Value |")
+    lines.append("|---|---|")
+    lines.append(f"| **Status** | `{data['status']}` |")
+    lines.append(f"| **Duration** | {data['duration']} |")
+    lines.append(f"| **Live LLM Calls** | {data['live_llm_calls']} |")
+    lines.append(f"| **Tests Planned** | {data['tests_planned']} |\n")
+
+    lines.append("## Test Case Execution Summary\n")
+    lines.append("| Key | Role | Requirement | Status | Steps | Screenshots | Final Observation |")
+    lines.append("|:---:|:---:|:---:|:---:|:---:|:---:|---|")
+
+    for t in data["tests"]:
+        obs_escaped = t["final_observation"].replace("|", "\\|")
+        lines.append(
+            f"| `{t['test_key']}` | `{t['target_role']}` | `{t['source_requirement']}` | "
+            f"**{t['final_status']}** | {t['step_count']} | {t['screenshot_present']} | "
+            f"{obs_escaped} |"
+        )
+
+    if expect_defects:
+        lines.append("\n## SupportDesk Ground Truth Evaluation\n")
+        lines.append("| Key | Requirement | Expected | Actual | Ground Truth Verdict |")
+        lines.append("|:---:|:---:|:---:|:---:|:---:|")
+
+        matches = 0
+        total_eval = 0
+        found_defects = set()
+
+        for t in data["tests"]:
+            req = t["source_requirement"]
+            is_defect_req = req in SUPPORTDESK_PLANTED_DEFECT_REQS
+            expected = "FAILED" if is_defect_req else "PASSED"
+            actual = t["final_status"]
+            is_match = (actual == expected)
+            verdict = "✅ MATCH" if is_match else "❌ MISMATCH"
+
+            if is_match:
+                matches += 1
+            total_eval += 1
+
+            if is_defect_req and actual == "FAILED":
+                found_defects.add(req)
+
+            lines.append(
+                f"| `{t['test_key']}` | `{req}` | `{expected}` | `{actual}` | {verdict} |"
+            )
+
+        defects_found_count = len(found_defects)
+        total_defects = len(SUPPORTDESK_PLANTED_DEFECT_REQS)
+        lines.append(f"\n> **Defects Detected**: {defects_found_count} of {total_defects}")
+        for req_id, name in SUPPORTDESK_PLANTED_DEFECT_REQS.items():
+            status_text = "✅ **FOUND** (`FAILED`)" if req_id in found_defects else "❌ **MISSED**"
+            lines.append(f"> - `{req_id}` ({name}): {status_text}")
+        lines.append(f"> \n> **Total Requirements Aligned**: {matches} of {total_eval}")
+
+    return "\n".join(lines)
+
+
 async def run_review(
     run_id: Optional[uuid.UUID] = None,
     expect_defects: bool = False,
     db_url: Optional[str] = None,
+    as_markdown: bool = False,
 ) -> int:
     """Execute review and print results."""
     settings = get_settings()
@@ -245,7 +308,10 @@ async def run_review(
             print("No matching test run found in database.")
             return 1
 
-        output = format_review_text(data, expect_defects=expect_defects)
+        if as_markdown:
+            output = format_review_markdown(data, expect_defects=expect_defects)
+        else:
+            output = format_review_text(data, expect_defects=expect_defects)
         print(output)
         return 0
 
@@ -273,6 +339,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Compare verdicts against SupportDesk ground truth (SUPPORTDESK_DEFECTS=on)",
     )
     parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="Output review as GitHub Flavored Markdown",
+    )
+    parser.add_argument(
         "--db-url",
         default=None,
         help="Optional database URL override",
@@ -293,6 +364,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             run_id=target_uuid,
             expect_defects=args.expect_supportdesk_defects,
             db_url=args.db_url,
+            as_markdown=args.markdown,
         )
     )
 
