@@ -377,3 +377,30 @@ Decision:
 - Explicitly isolated from agent runtime: expectation mapping is strictly for post-run evaluation and is prohibited from being referenced or imported by planner, executor, or analyst agent logic.
 Consequences: Fast, automated, reproducible CLI evaluation of TestPilot test runs against ground truth.
 
+## D-045 Multi-Job CI/CD Matrix and Containerized Service Architecture
+Status: Accepted
+Context: Preparing TestPilot AI for open-source release requires automated CI verification across all subsystems without risking credentials or relying on manual test runs.
+Decision:
+- Implemented GitHub Actions CI matrix comprising:
+  * Backend CI (`backend-ci.yml`): Runs on `ubuntu-latest`, provisions `pgvector/pgvector:pg16` and `redis:7-alpine` service containers, executes Alembic migrations, runs Ruff linter, and executes 173 backend pytest unit/integration tests with `NullPool` against isolated `testpilot_test`.
+  * Frontend CI (`frontend-ci.yml`): Runs on `ubuntu-latest` with Node 20, runs Oxlint linter, executes 32 Vitest tests, and validates production Vite builds.
+  * SupportDesk Target CI (`supportdesk-ci.yml`): Validates SupportDesk demo target functionality and defect toggles across 5 pytest tests.
+  * Unified CI (`ci.yml`): Orchestrates all checks with concurrency protection (`cancel-in-progress: true`).
+- Created `docker-compose.yml` and `supportdesk/Dockerfile` to allow developers and CI environments to run PostgreSQL + pgvector, Redis, and SupportDesk target services in isolated containers.
+- Provided cross-platform automated test runner scripts (`scripts/run_all_tests.ps1` and `scripts/run_all_tests.sh`) to enable 1-command verification of all suites prior to git commits.
+Consequences: Every PR and push is deterministically verified across all stack layers with zero reliance on manual intervention.
+
+## D-046 GitHub Repository Naming, Public Release Strategy, and Secret Management
+Status: Accepted
+Context: Deploying TestPilot AI to GitHub requires a uniquely identifiable repository name, clean secret separation, and complete community governance infrastructure.
+Decision:
+- Selected uniquely identified repository name: `Tapas2050/testpilot-ai`.
+- Clean secret management for CI and public execution:
+  * Public repository requires zero mandatory secrets for baseline CI runs: test suites run with mocked LLM responses (`pytest -m "not eval"`) and deterministic fixtures.
+  * Test JWT secrets and Fernet encryption keys are auto-injected from `.github/ci-test.env`.
+  * Live LLM evaluations on scheduled or dispatched runs optionally ingest `GEMINI_API_KEY` and `OPENROUTER_API_KEY` from GitHub Repository Secrets.
+- Added GitHub community health files: `LICENSE` (MIT License), `CONTRIBUTING.md`, `SECURITY.md`, Issue templates for bug reports and feature requests, and Pull Request template.
+- Restyled showcase `README.md` following `readme-creator` principles with system architecture diagrams, tech matrix, and ground-truth benchmark metrics.
+Consequences: Clear open-source governance, secure secret separation, and high-impact repository presentation.
+
+
