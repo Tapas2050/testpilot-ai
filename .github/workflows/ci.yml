@@ -1,0 +1,155 @@
+name: TestPilot Unified CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-checks:
+    name: Backend Pytest & Lint
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testpilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/testpilot
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/testpilot_test
+      REDIS_URL: redis://localhost:6379/0
+      TEST_REDIS_URL: redis://localhost:6379/1
+      JWT_SECRET: ci-jwt-secret-testing-minimum-32-characters-required
+      ENCRYPTION_KEY: dXNlci1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcy1iYXNlNjQ=
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || 'dummy-ci-gemini-key' }}
+      ROOT_DIR: ${{ github.workspace }}
+      STORAGE_DIR: ${{ github.workspace }}/storage
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          uv sync --frozen || uv sync
+
+      - name: Initialize test databases & vector extension
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d testpilot -c "CREATE DATABASE testpilot_test;"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d testpilot -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d testpilot_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Run database migrations
+        run: |
+          cd backend
+          uv run alembic upgrade head
+
+      - name: Lint with Ruff
+        run: |
+          cd backend
+          uv run ruff check .
+
+      - name: Run Backend Pytest Suite
+        run: |
+          cd backend
+          uv run pytest -m "not eval" -v
+
+  frontend-checks:
+    name: Frontend Vitest, Lint & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci || npm install
+
+      - name: Lint with Oxlint
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Run Vitest Suite
+        run: |
+          cd frontend
+          npm test -- --run
+
+      - name: Build frontend distribution
+        run: |
+          cd frontend
+          npm run build
+
+  supportdesk-checks:
+    name: SupportDesk Target CRM Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          cd supportdesk
+          uv sync --frozen || uv sync
+
+      - name: Run SupportDesk Pytest Suite
+        run: |
+          cd supportdesk
+          uv run pytest -v
