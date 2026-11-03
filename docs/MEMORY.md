@@ -18,9 +18,9 @@ TestPilot AI: web platform where an AI agent plans, runs and reports browser tes
 - SECURITY.md: threats and controls
 
 ## 3. Current State
-- Current phase: Live Status Reliability, Negative Check Verification, TC Numbering, and Review Script (Completed)
-- Status: Live status progression is reliable and synchronized across DB, Redis, API (Cache-Control: no-store, server_time), and frontend stepper/timer. Negative check verification deterministically catches prohibited actions succeeding without rejection (fixing the missed agent-deletion defect REQ-SEC-02). Test keys consistently start at TC-1. Read-only review script `backend/scripts/review_run.py` evaluates run stats and ground truth defect matches. All 173 backend tests, 2 browser ground-truth tests, 5 supportdesk tests, and 32 frontend vitest tests passing cleanly.
-- Date of last update: 2026-10-13
+- Current phase: Phase 14: Showcase README, CI/CD Pipeline Matrix, and Public Repository Release (Completed)
+- Status: Architecture-grounded showcase README created using `readme-creator` with ASCII execution state machines, tech stack matrix, and SupportDesk ground-truth benchmarks. Multi-job GitHub Actions CI/CD pipeline matrix configured for Backend (PostgreSQL 16 + pgvector, Redis), Frontend (Vitest, Oxlint), and SupportDesk CRM. Added automated multi-suite test runners, Docker Compose stack, GitHub community health files (bug report, feature request, PR template, MIT license, CONTRIBUTING, SECURITY), and markdown review CLI formatting. All 173 backend tests, 5 supportdesk tests, and 32 frontend vitest tests passing cleanly.
+- Date of last update: 2026-11-03
 
 ## 4. Environment Facts (verified)
 - Hardware: 8 GB RAM (about 83% used at idle), Intel Iris Xe integrated GPU, no dedicated GPU. Memory budget rules in D-018 respected throughout.
