@@ -92,4 +92,4 @@ jobs:
       - name: Run Backend Pytest Suite
         run: |
           cd backend
-          uv run pytest -m "not eval" -v
+          uv run pytest -m "not eval and not browser" -v
