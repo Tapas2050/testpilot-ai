@@ -41,7 +41,7 @@ _all_running_pids: set[int] = set()
 
 def kill_process_tree(pid: int) -> None:
     """Kill the entire process tree including all child processes (Windows & POSIX)."""
-    if not pid:
+    if not pid or pid <= 0:
         return
     if os.name == "nt":
         try:
